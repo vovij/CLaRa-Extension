@@ -200,3 +200,6 @@ xformers==0.0.29.post2
 xgrammar==0.1.21
 xxhash==3.6.0
 yarl==1.20.1
+datasets
+wikipedia-api
+tqdm
