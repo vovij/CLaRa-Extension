@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
 import spacy
-import evaluate
+import evaluate as hf_evaluate
 import re
 import string
 
@@ -39,8 +39,8 @@ class EvaluationMetrics:
     """Handles all evaluation metrics and scoring functions."""
     
     def __init__(self):
-        self.bertscore = evaluate.load("bertscore")
-        self.rouge = evaluate.load("rouge")
+        self.bertscore = hf_evaluate.load("bertscore")
+        self.rouge = hf_evaluate.load("rouge")
         self.nlp = spacy.load("en_core_web_sm")
     
     @staticmethod
@@ -423,7 +423,7 @@ class DataLoader:
     def load_stage1_data(dataset: str, gold_retrieval: bool) -> List[Dict]:
         """Load stage1 evaluation data."""
         retrieval_type = "with_pos" if gold_retrieval else "no_pos"
-        file_path = f"/mnt/conductor_data/data/compression_rag_data/generator_training_val_data/stage1_eval/{dataset}/eval_processed_{retrieval_type}.jsonl"
+        file_path = f"/vol/biomedic3/vd425/clara-main/ml-clara/evaluation/evaluation_data/end_to_end_evaluation/{dataset}/eval_processed_{retrieval_type}.jsonl"
         
         data = []
         with open(file_path, 'r') as f:
@@ -447,7 +447,7 @@ class DataLoader:
     def load_stage2_data(dataset: str, gold_retrieval: bool) -> List[Dict]:
         """Load stage2 evaluation data."""
         retrieval_type = "with_pos" if gold_retrieval else "no_pos"
-        file_path = f"/mnt/conductor_data/data/compression_rag_data/generator_training_val_data/stage2_eval/{dataset}/eval_processed_{retrieval_type}.jsonl"
+        file_path = f"/vol/biomedic3/vd425/clara-main/ml-clara/evaluation/evaluation_data/end_to_end_evaluation/{dataset}/eval_processed_{retrieval_type}.jsonl"
         
         processed_data = []
         with open(file_path, 'r') as f:
@@ -710,7 +710,7 @@ def main():
         print(f"Loaded {len(processed_data)} samples for {dataset}")
         
         # Initialize inference engine
-        model_path = os.path.join('/mnt/task_wrapper/user_output/artifacts/data/train_checkpoint', args.model_path)
+        model_path = args.model_path
         args.model_path = model_path
         
         inference_engine = AcceleratedCLaRaInference(
