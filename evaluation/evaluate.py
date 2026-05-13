@@ -483,6 +483,24 @@ class DataLoader:
             processed_data.append(processed_item)
         
         return processed_data
+    
+    @staticmethod
+    def load_frames_data() -> List[Dict]:
+        """Load FRAMES evaluation data."""
+        file_path = "/vol/biomedic3/vd425/clara-main/ml-clara/evaluation/evaluation_data/end_to_end_evaluation/frames/frames_clara.jsonl"
+        
+        processed_data = []
+        with open(file_path, 'r') as f:
+            for index, line in enumerate(f):
+                item = json.loads(line)
+                processed_data.append({
+                    'original_data': item,
+                    'documents': item['docs'],
+                    'question': item['question'],
+                    'global_index': index
+                })
+
+        return processed_data
 
 
 class AcceleratedCLaRaInference:
@@ -699,7 +717,11 @@ def main():
         if args.stage in ['stage1', 'stage1_2']:
             processed_data = DataLoader.load_stage1_data(dataset, args.gold_retrieval)
         elif args.stage == 'stage2':
-            processed_data = DataLoader.load_stage2_data(dataset, args.gold_retrieval)
+            # Added FRAMES eval
+            if dataset == 'frames':
+                processed_data = DataLoader.load_frames_data()
+            else:
+                processed_data = DataLoader.load_stage2_data(dataset, args.gold_retrieval)
         elif args.stage in ['stage1_paraphrase', 'stage1_mse_visulize']:
             if not args.paraphrase_path:
                 raise ValueError(f"--paraphrase_path required for stage {args.stage}")
@@ -875,7 +897,10 @@ def main():
             calculator = ResultCalculator()
             
             if args.stage == 'stage2':
-                metrics = calculator.calculate_stage2_metrics(final_results)
+                if dataset == 'frames':
+                    metrics = calculator.calculate_basic_metrics(final_results) # add metrics calculation for FRAMES
+                else:
+                    metrics = calculator.calculate_stage2_metrics(final_results)
             elif args.stage == 'stage1_paraphrase':
                 metrics = calculator.calculate_paraphrase_metrics(final_results)
             elif args.stage == 'stage1_mse_visulize':
