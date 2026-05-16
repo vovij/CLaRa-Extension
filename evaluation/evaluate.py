@@ -21,11 +21,14 @@ import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
 import spacy
-import evaluate as hf_evaluate
+import importlib
 import re
 import string
 
 from openrlhf.models.modeling_clara import CLaRa
+
+# fix the hf_evaluate error
+hf_evaluate = importlib.import_module("evaluate")
 
 # Environment setup
 os.environ["NCCL_TIMEOUT"] = "5400"
