@@ -511,7 +511,9 @@ class CLaRa(PreTrainedModel):
             task_type="CAUSAL_LM", 
             r=lora_r, 
             lora_alpha=2*lora_r, 
-            target_modules='all-linear', 
+            # NOTE: revert back------
+            # target_modules='all-linear', 
+            target_modules=["q_proj"], 
             lora_dropout=0.1
         )
 

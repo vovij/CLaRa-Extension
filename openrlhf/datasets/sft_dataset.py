@@ -433,7 +433,7 @@ class SFTDataset(Dataset):
                  strategy,
                  input_template: Optional[str] = None,
                  pretrain_mode: bool = False,
-                 num_processors: int = 8,
+                 num_processors: int = 2,
                  multiturn: bool = False) -> None:
         """
         Initialize the SFT dataset.

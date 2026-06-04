@@ -140,7 +140,7 @@ class DeepspeedStrategy(ABC):
         if isinstance(model, Actor):
             model = model.model
         # Optimizer
-        AdamOptimizer = DeepSpeedCPUAdam if self.adam_offload else FusedAdam
+        AdamOptimizer = DeepSpeedCPUAdam if self.adam_offload else torch.optim.Adam
         optim_params = get_optimizer_grouped_parameters(model, kwargs["weight_decay"])
         optim = AdamOptimizer(optim_params, **kwargs)
         return optim
