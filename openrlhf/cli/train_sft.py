@@ -140,7 +140,6 @@ def setup_datasets(args: argparse.Namespace, tokenizer, strategy, model: CLaRa):
 
 def setup_training_components(args: argparse.Namespace, model: CLaRa, train_dataset, strategy):
     """Setup optimizer, scheduler and other training components."""
-    # Configure optimizer
     optimizer = strategy.create_optimizer(
         model, 
         lr=args.learning_rate, 
@@ -148,12 +147,8 @@ def setup_training_components(args: argparse.Namespace, model: CLaRa, train_data
         weight_decay=args.l2
     )
 
-    # Configure scheduler
     num_update_steps_per_epoch = len(train_dataset) // args.train_batch_size
     max_steps = math.ceil(args.max_epochs * num_update_steps_per_epoch)
-
-    # Prepare models with strategy
-    model, optimizer, scheduler = strategy.prepare((model, optimizer, scheduler))
 
     scheduler = get_scheduler(
         args.lr_scheduler,
@@ -162,6 +157,9 @@ def setup_training_components(args: argparse.Namespace, model: CLaRa, train_data
         num_training_steps=max_steps,
         scheduler_specific_kwargs={"min_lr": args.learning_rate * 0.1},
     )
+
+    # Prepare with strategy — scheduler passed in so DeepSpeed manages it
+    model, optimizer, scheduler = strategy.prepare((model, optimizer, scheduler))
     
     return model, optimizer, scheduler, num_update_steps_per_epoch
 

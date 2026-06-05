@@ -55,8 +55,6 @@ training_commands="/vol/biomedic3/vd425/clara-main/ml-clara/openrlhf/cli/train_s
     --max_epochs 1 \
     --bf16 \
     --learning_rate 1e-4 \
-    --lr_scheduler constant \
-    --lr_warmup_ratio 0.0 \
     --gradient_checkpointing \
     --generation_top_k 1 \
     --qa_loss \
