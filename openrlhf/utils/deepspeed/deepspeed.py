@@ -240,7 +240,7 @@ class DeepspeedStrategy(ABC):
         engine, optim, _, scheduler = deepspeed.initialize(
             model=model.model if is_actor else model,
             optimizer=optim,
-            lr_scheduler=scheduler,
+            lr_scheduler=scheduler,      # back to original
             config=ds_config,
             args={"local_rank": int(os.environ.get("LOCAL_RANK", "-1"))},
             dist_init_required=True,

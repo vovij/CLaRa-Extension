@@ -155,7 +155,7 @@ def setup_training_components(args: argparse.Namespace, model: CLaRa, train_data
         optimizer,
         num_warmup_steps=math.ceil(max_steps * args.lr_warmup_ratio),
         num_training_steps=max_steps,
-        scheduler_specific_kwargs={"min_lr": args.learning_rate * 0.1},
+        scheduler_specific_kwargs={"min_lr": args.learning_rate * 0.1} if args.lr_scheduler == "cosine_with_min_lr" else {},
     )
 
     # Prepare with strategy — scheduler passed in so DeepSpeed manages it

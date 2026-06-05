@@ -106,28 +106,12 @@ def get_eval_ds_config(
     }
 
 
-def get_optimizer_grouped_parameters(
-    model,
-    weight_decay,
-    no_decay_name_list=["bias", "layer_norm.weight", "layernorm.weight", "norm.weight", "ln_f.weight"],
-):
+def get_optimizer_grouped_parameters(model, weight_decay, no_decay_name_list=["bias", "layer_norm.weight", "layernorm.weight", "norm.weight", "ln_f.weight"]):
     optimizer_grouped_parameters = [
         {
-            "params": [
-                p
-                for n, p in model.named_parameters()
-                if (not any(nd in n for nd in no_decay_name_list) and p.requires_grad)
-            ],
+            "params": [p for n, p in model.named_parameters() if p.requires_grad],
             "weight_decay": weight_decay,
-        },
-        {
-            "params": [
-                p
-                for n, p in model.named_parameters()
-                if (any(nd in n for nd in no_decay_name_list) and p.requires_grad)
-            ],
-            "weight_decay": 0.0,
-        },
+        }
     ]
     return optimizer_grouped_parameters
 
