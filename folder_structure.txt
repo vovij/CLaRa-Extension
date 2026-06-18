@@ -1,0 +1,316 @@
+vd425@vm-shell1:/vol/biomedic3/vd425/clara-main$ tree -L 4
+.
+├── calc_metrics.py
+├── checkpoints
+│   ├── CLaRa-7B-E2E
+│   │   ├── compression-128
+│   │   │   ├── adapters.pth
+│   │   │   ├── chat_template.jinja
+│   │   │   ├── config.json
+│   │   │   ├── decoder_first_last_layers.pth
+│   │   │   ├── modeling_clara.py
+│   │   │   ├── musique_stage2_True_5.jsonl
+│   │   │   ├── special_tokens_map.json
+│   │   │   ├── tokenizer_config.json
+│   │   │   ├── tokenizer.json
+│   │   │   └── tokenizer.model
+│   │   ├── compression-16
+│   │   │   ├── adapters.pth
+│   │   │   ├── chat_template.jinja
+│   │   │   ├── config.json
+│   │   │   ├── decoder_first_last_layers.pth
+│   │   │   ├── frames_stage2_False_5.jsonl
+│   │   │   ├── modeling_clara.py
+│   │   │   ├── musique_stage2_True_5.jsonl
+│   │   │   ├── special_tokens_map.json
+│   │   │   ├── tokenizer_config.json
+│   │   │   ├── tokenizer.json
+│   │   │   └── tokenizer.model
+│   │   └── README.md
+│   └── stage1
+│       ├── cr128
+│       │   ├── adapters.pth
+│       │   ├── chat_template.jinja
+│       │   ├── checkpoints
+│       │   ├── config.json
+│       │   ├── decoder_first_last_layers.pth
+│       │   ├── special_tokens_map.json
+│       │   ├── tokenizer_config.json
+│       │   ├── tokenizer.json
+│       │   └── tokenizer.model
+│       ├── cr16
+│       │   ├── adapters.pth
+│       │   ├── chat_template.jinja
+│       │   ├── checkpoints
+│       │   ├── config.json
+│       │   ├── decoder_first_last_layers.pth
+│       │   ├── special_tokens_map.json
+│       │   ├── tokenizer_config.json
+│       │   ├── tokenizer.json
+│       │   └── tokenizer.model
+│       ├── cr256
+│       ├── cr32
+│       │   ├── adapters.pth
+│       │   ├── chat_template.jinja
+│       │   ├── checkpoints
+│       │   ├── config.json
+│       │   ├── decoder_first_last_layers.pth
+│       │   ├── special_tokens_map.json
+│       │   ├── tokenizer_config.json
+│       │   ├── tokenizer.json
+│       │   └── tokenizer.model
+│       ├── cr4
+│       │   ├── adapters.pth
+│       │   ├── chat_template.jinja
+│       │   ├── checkpoints
+│       │   ├── config.json
+│       │   ├── decoder_first_last_layers.pth
+│       │   ├── special_tokens_map.json
+│       │   ├── tokenizer_config.json
+│       │   ├── tokenizer.json
+│       │   └── tokenizer.model
+│       └── cr64
+│           ├── adapters.pth
+│           ├── chat_template.jinja
+│           ├── checkpoints
+│           ├── config.json
+│           ├── decoder_first_last_layers.pth
+│           ├── special_tokens_map.json
+│           ├── tokenizer_config.json
+│           ├── tokenizer.json
+│           └── tokenizer.model
+├── data
+│   ├── clara_logo.jpg
+│   ├── e2e_eval_2wiki_no_pos
+│   │   └── train-00000-of-00001-d685c2783816d25b.parquet
+│   ├── e2e_eval_2wiki_with_pos
+│   │   └── train-00000-of-00001-d14a8f64ecc63095.parquet
+│   ├── e2e_eval_hotpotqa_no_pos
+│   │   └── train-00000-of-00001-dcda6d89e5178799.parquet
+│   ├── e2e_eval_hotpotqa_with_pos
+│   │   └── train-00000-of-00001-a195f62a59210db2.parquet
+│   ├── e2e_eval_musique_no_pos
+│   │   └── train-00000-of-00001-49885da1b2ec8ce2.parquet
+│   ├── e2e_eval_musique_with_pos
+│   │   └── train-00000-of-00001-bd572b6db867e936.parquet
+│   ├── e2e_eval_nq_no_pos
+│   │   └── train-00000-of-00001-c17627658add3415.parquet
+│   ├── e2e_eval_nq_with_pos
+│   │   └── train-00000-of-00001-35157c77f3de6014.parquet
+│   ├── e2e_training_ours_2wiki_no_pos
+│   │   ├── train-00000-of-00004-689b2bb20d35e471.parquet
+│   │   ├── train-00001-of-00004-5fb648a7d90d16fd.parquet
+│   │   ├── train-00002-of-00004-530593b961c3c079.parquet
+│   │   └── train-00003-of-00004-fa67d255b66a0a6c.parquet
+│   ├── e2e_training_ours_2wiki_with_pos
+│   │   ├── train-00000-of-00004-0d5a5ef84988b956.parquet
+│   │   ├── train-00001-of-00004-00e653084beaf64b.parquet
+│   │   ├── train-00002-of-00004-b1f8077747d8bfe2.parquet
+│   │   └── train-00003-of-00004-129d297027aad68f.parquet
+│   ├── e2e_training_ours_hotpotqa_no_pos
+│   │   ├── train-00000-of-00003-43cf4159d25a58dc.parquet
+│   │   ├── train-00001-of-00003-f65ecea7344de885.parquet
+│   │   └── train-00002-of-00003-46c01b7e35add4d9.parquet
+│   ├── e2e_training_ours_hotpotqa_with_pos
+│   │   ├── train-00000-of-00003-bbd3510c1c77b6bd.parquet
+│   │   ├── train-00001-of-00003-a67e7f3b52b437d8.parquet
+│   │   └── train-00002-of-00003-3eb7bd949a4c41d3.parquet
+│   ├── e2e_training_ours_musique_no_pos
+│   │   └── train-00000-of-00001-d0a2e359e921f582.parquet
+│   ├── e2e_training_ours_musique_with_pos
+│   │   ├── train-00000-of-00006-d93cf2d1a39c5025.parquet
+│   │   ├── train-00001-of-00006-14ff76a96d5e313a.parquet
+│   │   ├── train-00002-of-00006-a879d24ccb80f475.parquet
+│   │   ├── train-00003-of-00006-2ddacd9c461da8f4.parquet
+│   │   ├── train-00004-of-00006-51353f56963c5fa0.parquet
+│   │   └── train-00005-of-00006-98203ad2354c4939.parquet
+│   ├── e2e_training_ours_nq_no_pos
+│   │   ├── train-00000-of-00002-e36c2501ba98626d.parquet
+│   │   └── train-00001-of-00002-746445c97d540a68.parquet
+│   ├── e2e_training_ours_nq_with_pos
+│   │   ├── train-00000-of-00002-c285ed66cc19b03e.parquet
+│   │   └── train-00001-of-00002-b6bf7cba563ec222.parquet
+│   ├── inst_eval_2wiki_no_pos
+│   │   └── train-00000-of-00001-d685c2783816d25b.parquet
+│   ├── inst_eval_2wiki_with_pos
+│   │   └── train-00000-of-00001-d14a8f64ecc63095.parquet
+│   ├── inst_eval_hotpotqa_no_pos
+│   │   └── train-00000-of-00001-dcda6d89e5178799.parquet
+│   ├── inst_eval_hotpotqa_with_pos
+│   │   └── train-00000-of-00001-a195f62a59210db2.parquet
+│   ├── inst_eval_musique_no_pos
+│   │   └── train-00000-of-00001-49885da1b2ec8ce2.parquet
+│   ├── inst_eval_musique_with_pos
+│   │   └── train-00000-of-00001-bd572b6db867e936.parquet
+│   ├── inst_eval_nq_no_pos
+│   │   └── train-00000-of-00001-c17627658add3415.parquet
+│   ├── inst_eval_nq_with_pos
+│   │   └── train-00000-of-00001-35157c77f3de6014.parquet
+│   ├── instruction_tuning
+│   │   ├── train-00000-of-00004-05f56db3df0df8da.parquet
+│   │   ├── train-00001-of-00004-ed7b380b7f4e3312.parquet
+│   │   ├── train-00002-of-00004-f9580f43f2d7814e.parquet
+│   │   └── train-00003-of-00004-0378216d0cbb3841.parquet
+│   ├── pretraining
+│   │   ├── train-00000-of-00021-07780a8f8e707c96.parquet
+│   │   ├── train-00001-of-00021-c418e1ba73b8dc4b.parquet
+│   │   ├── train-00002-of-00021-a80249e0d4b18e1d.parquet
+│   │   ├── train-00003-of-00021-9692f46f346900e7.parquet
+│   │   ├── train-00004-of-00021-a8a13ce0686c28ff.parquet
+│   │   ├── train-00005-of-00021-302845848f3ad60b.parquet
+│   │   ├── train-00006-of-00021-e34cd47a0023346b.parquet
+│   │   ├── train-00007-of-00021-b05b585bbf346f26.parquet
+│   │   ├── train-00008-of-00021-140bdf8e0b3e9491.parquet
+│   │   ├── train-00009-of-00021-82c0b721a3dde569.parquet
+│   │   ├── train-00010-of-00021-29828692aa5326e5.parquet
+│   │   ├── train-00011-of-00021-8bc9af2119d293e0.parquet
+│   │   ├── train-00012-of-00021-958308c5c74f7133.parquet
+│   │   ├── train-00013-of-00021-28e52928bd674bee.parquet
+│   │   ├── train-00014-of-00021-70699fb25342efe4.parquet
+│   │   ├── train-00015-of-00021-be0d41d3eec42678.parquet
+│   │   ├── train-00016-of-00021-66ed587f2e6b5b01.parquet
+│   │   ├── train-00017-of-00021-bcf99bb3e40bac7c.parquet
+│   │   ├── train-00018-of-00021-01d3a8489dbf7889.parquet
+│   │   ├── train-00019-of-00021-f676c18c1325416c.parquet
+│   │   └── train-00020-of-00021-115400ce98387aac.parquet
+│   └── README.md
+├── folder_structure.txt
+├── logs
+│   ├── archive
+│   │   ├── check_cuda_62777.log
+│   │   ├── cr4_mutiple_65381.log
+│   │   ├── download_57926.log
+│   │   ├── download_clara_62872.log
+│   │   ├── download_clara_62877.log
+│   │   ├── download_clara_62878.log
+│   │   ├── download_clara_62879.log
+│   │   ├── download_clara_62880.log
+│   │   ├── download_clara_62881.log
+│   │   ├── download_clara_62882.log
+│   │   ├── eval_frames_61288.log
+│   │   └── ...
+│   ├── stage1_cr128_65758.log
+│   ├── stage1_cr16_65684.log
+│   ├── stage1_cr256_65672.log
+│   ├── stage1_cr32_65703.log
+│   ├── stage1_cr4_multiple_65583.log
+│   ├── stage1_cr4_multiple_65584.log
+│   ├── stage1_cr4_multiple_65598.log
+│   ├── stage1_cr4_multiple_65600.log
+│   └── stage1_cr64_65718.log
+├── ml-clara
+│   ├── ACKNOWLEDGEMENTS
+│   ├── CODE_OF_CONDUCT.md
+│   ├── CONTRIBUTING.md
+│   ├── docs
+│   │   ├── _config.yml
+│   │   ├── Gemfile
+│   │   ├── getting_started.md
+│   │   ├── index.md
+│   │   ├── inference.md
+│   │   └── training.md
+│   ├── evaluation
+│   │   ├── evaluate.py
+│   │   ├── evaluation_data
+│   │   │   ├── end_to_end_evaluation
+│   │   │   └── instruction_tuning_evaluation
+│   │   └── __pycache__
+│   │       └── evaluate.cpython-310.pyc
+│   ├── example
+│   │   ├── end_to_end_data.jsonl
+│   │   ├── instruction_tuning_data.jsonl
+│   │   ├── pretrain_data.jsonl
+│   │   └── test.ipynb
+│   ├── figs
+│   │   ├── clara_logo.jpg
+│   │   ├── intro.png
+│   │   ├── main_recall.png
+│   │   └── sample_main.png
+│   ├── inference.ipynb
+│   ├── LICENSE
+│   ├── openrlhf
+│   │   ├── cli
+│   │   │   ├── __init__.py
+│   │   │   ├── __pycache__
+│   │   │   └── train_sft.py
+│   │   ├── datasets
+│   │   │   ├── frames_clara.jsonl
+│   │   │   ├── __init__.py
+│   │   │   ├── prepare_frames.py
+│   │   │   ├── __pycache__
+│   │   │   ├── sft_dataset.py
+│   │   │   └── utils.py
+│   │   ├── __init__.py
+│   │   ├── models
+│   │   │   ├── actor.py
+│   │   │   ├── __init__.py
+│   │   │   ├── loss.py
+│   │   │   ├── modeling_clara.py
+│   │   │   ├── __pycache__
+│   │   │   ├── ring_attn_utils.py
+│   │   │   └── utils.py
+│   │   ├── __pycache__
+│   │   │   └── __init__.cpython-310.pyc
+│   │   ├── trainer
+│   │   │   ├── __init__.py
+│   │   │   ├── __pycache__
+│   │   │   └── sft_trainer.py
+│   │   └── utils
+│   │       ├── deepspeed
+│   │       ├── distributed_sampler.py
+│   │       ├── distributed_util.py
+│   │       ├── __init__.py
+│   │       ├── logging_utils.py
+│   │       ├── processor.py
+│   │       ├── __pycache__
+│   │       └── utils.py
+│   ├── README.md
+│   ├── requirements_clara_eval.txt
+│   ├── requirements_clean.txt
+│   ├── requirements.txt
+│   └── scripts
+│       ├── evaluation_end_to_end.sh
+│       ├── evaluation_instruction_tuning.sh
+│       ├── evaluation.sh
+│       ├── train_instruction_tuning.log
+│       ├── train_instruction_tuning.sh
+│       ├── train_pretraining.log
+│       ├── train_pretraining.sh
+│       ├── train_stage_end_to_end.log
+│       └── train_stage_end_to_end.sh
+├── models
+│   └── Mistral-7B-Instruct-v0.2
+│       ├── config.json
+│       ├── generation_config.json
+│       ├── model-00001-of-00003.safetensors
+│       ├── model-00002-of-00003.safetensors
+│       ├── model-00003-of-00003.safetensors
+│       ├── model.safetensors.index.json
+│       ├── pytorch_model-00001-of-00003.bin
+│       ├── pytorch_model-00002-of-00003.bin
+│       ├── pytorch_model-00003-of-00003.bin
+│       ├── pytorch_model.bin.index.json
+│       ├── README.md
+│       ├── special_tokens_map.json
+│       ├── tokenizer_config.json
+│       ├── tokenizer.json
+│       └── tokenizer.model
+└── scripts
+    ├── downloads
+    │   ├── download_clara_data.sh
+    │   └── download_models.sh
+    ├── eval
+    │   ├── compute_metrics.py
+    │   ├── eval_comp16.sh
+    │   └── eval_frames.sh
+    ├── tests
+    │   ├── check_cuda.sh
+    │   ├── eval_trial.sh
+    │   ├── stage1_cr4_debug.sh
+    │   └── test.sh
+    └── training
+        ├── stage1_array.sh
+        ├── stage1_cr4_mutiple_gpus.sh
+        └── stage1_cr4.sh
+
+76 directories, 356 files
