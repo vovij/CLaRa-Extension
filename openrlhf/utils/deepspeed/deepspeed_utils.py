@@ -27,12 +27,18 @@ def get_train_ds_config(
             "device": "cpu" if adam_offload else "none",
             "pin_memory": True,
         },
+        "allgather_partitions": True,       # ← ADD
+        "allgather_bucket_size": 5e7,       # ← ADD
+        "overlap_comm": True,               # ← ADD
+        "reduce_scatter": True,             # ← ADD
+        "reduce_bucket_size": 2e7,          # ← ADD
+        "contiguous_gradients": True,       # ← ADD
         "sub_group_size": "auto",
         "stage3_max_live_parameters": "auto",
         "stage3_max_reuse_distance": "auto",
-        "stage3_param_persistence_threshold": "auto",
+        "stage3_param_persistence_threshold": 1e6,  # CHANGED: "auto" can hang on custom models
         "stage3_prefetch_bucket_size": "auto",
-        "reduce_bucket_size": "auto",
+        "reduce_bucket_size": 5e7, # CHANGED: was "auto" 
         # ZeRO++
         "zero_hpz_partition_size": zpg,
         "zero_quantized_weights": False,
@@ -43,6 +49,9 @@ def get_train_ds_config(
         zero_opt_dict["contiguous_gradients"] = True
     if stage == 3:
         zero_opt_dict["reduce_scatter"] = True
+        zero_opt_dict["stage3_gather_16bit_weights_on_model_save"] = True
+        # Allow DeepSpeed to handle already-materialised parameters
+        zero_opt_dict["ignore_unused_parameters"] = True
 
     return {
         "steps_per_print": 100,

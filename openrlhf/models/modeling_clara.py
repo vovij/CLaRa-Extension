@@ -356,17 +356,19 @@ class CLaRa(PreTrainedModel):
             return AutoModelForCausalLM.from_pretrained(
                 cfg.decoder_model_name,
                 torch_dtype=torch.bfloat16,
-                resume_download=True,
-                trust_remote_code=True,
-                device_map=cfg.device_map
+                attn_implementation=cfg.attn_implementation,
+                device_map=cfg.device_map,
+                low_cpu_mem_usage=True, # added
+                _fast_init=False  # added
             )
-        
         if cfg.quantization == "no":
             return AutoModelForCausalLM.from_pretrained(
                 cfg.decoder_model_name,
                 torch_dtype=torch.bfloat16,
                 attn_implementation=cfg.attn_implementation,
-                device_map=cfg.device_map
+                device_map=cfg.device_map,
+                low_cpu_mem_usage=True, # added
+                _fast_init=False  # added
             )
         elif cfg.quantization == "int4":
             quant_config = BitsAndBytesConfig(
@@ -381,7 +383,9 @@ class CLaRa(PreTrainedModel):
                 torch_dtype=torch.bfloat16,
                 resume_download=True,
                 trust_remote_code=True,
-                device_map=cfg.device_map
+                device_map=cfg.device_map,
+                low_cpu_mem_usage=True, # added
+                _fast_init=False  # added
             )
         elif cfg.quantization == "int8":
             quant_config = BitsAndBytesConfig(
@@ -396,7 +400,9 @@ class CLaRa(PreTrainedModel):
                 torch_dtype=torch.bfloat16,
                 resume_download=True,
                 trust_remote_code=True,
-                device_map=cfg.device_map
+                device_map=cfg.device_map,
+                low_cpu_mem_usage=True, # added
+                _fast_init=False  # added
             )
         else:
             raise NotImplementedError(f"Quantization {cfg.quantization} not supported")
@@ -511,9 +517,7 @@ class CLaRa(PreTrainedModel):
             task_type="CAUSAL_LM", 
             r=lora_r, 
             lora_alpha=2*lora_r, 
-            # NOTE: revert back------
-            # target_modules='all-linear', 
-            target_modules=["q_proj"], 
+            target_modules='all-linear',
             lora_dropout=0.1
         )
 
@@ -1244,15 +1248,15 @@ class CLaRa(PreTrainedModel):
             print(f"Initializing model from trained checkpoint: {config}")
             model = cls(config)
 
-            # Load first and last layers
-            try:
+            # Check local path first to avoid network timeout on offline compute nodes.
+            # Only fall back to Hub if the file genuinely doesn't exist locally.
+            first_and_last_layers_path = os.path.join(
+                pretrained_model_name_or_path, "decoder_first_last_layers.pth"
+            )
+            if not os.path.exists(first_and_last_layers_path):
                 first_and_last_layers_path = hf_hub_download(
-                    repo_id=pretrained_model_name_or_path, 
+                    repo_id=pretrained_model_name_or_path,
                     filename="decoder_first_last_layers.pth"
-                )
-            except Exception:
-                first_and_last_layers_path = os.path.join(
-                    pretrained_model_name_or_path, "decoder_first_last_layers.pth"
                 )
 
             if os.path.exists(first_and_last_layers_path):
@@ -1267,14 +1271,14 @@ class CLaRa(PreTrainedModel):
 
             peft_config = model._get_peft_config(lora_r=config.lora_r)
             
-            # Load LoRA adapters
-            try:
+            # Check local path first to avoid network timeout on offline compute nodes.
+            # Only fall back to Hub if the file genuinely doesn't exist locally.
+            adapters_path = os.path.join(pretrained_model_name_or_path, "adapters.pth")
+            if not os.path.exists(adapters_path):
                 adapters_path = hf_hub_download(
-                    repo_id=pretrained_model_name_or_path, 
+                    repo_id=pretrained_model_name_or_path,
                     filename="adapters.pth"
                 )
-            except Exception:
-                adapters_path = os.path.join(pretrained_model_name_or_path, "adapters.pth")
     
             if os.path.exists(adapters_path):
                 adapters_state_dict = torch.load(adapters_path, map_location=map_location, weights_only=True)

@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --partition=gpus48
-#SBATCH --gres=gpu:8
+#SBATCH --gres=gpu:4
 #SBATCH --output=/vol/biomedic3/vd425/clara-main/logs/stage1_2_cr4_%j.log
 #SBATCH --time=4-11:59:00
 #SBATCH --job-name=clara_stage1_2_cr4
@@ -16,6 +16,15 @@ export CUDA_HOME=/vol/cuda/12.9.0
 export UV_CACHE_DIR=/vol/biomedic3/vd425/.cache/uv
 export PATH=$CUDA_HOME/bin:$PATH
 export NCCL_DEBUG=INFO
+
+#Zero3 Debug
+export NCCL_TIMEOUT=1200
+export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
+export TORCH_NCCL_TRACE_BUFFER_SIZE=2000
+export TORCH_NCCL_DUMP_ON_TIMEOUT=1
+export TORCH_NCCL_DEBUG_INFO_TEMP_FILE=/vol/biomedic3/vd425/clara-main/logs/nccl_trace_  # writable dir, not /tmp (avoid quota issues there too)
+export TORCH_DISTRIBUTED_DEBUG=DETAIL
+
 export NCCL_P2P_DISABLE=1
 export NCCL_IB_DISABLE=1
 export HF_HOME=/vol/biomedic3/vd425/.cache/huggingface
@@ -70,7 +79,8 @@ training_commands=(
     --save_hf_ckpt
     --logging_steps 1
     --eval_steps 30
-    --zero_stage 3
+    --zero_stage 2
+    --adam_offload
     --max_epochs 1
     --bf16
     --flash_attn

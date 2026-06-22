@@ -15,6 +15,7 @@ import math
 import os
 from datetime import datetime
 from typing import Optional
+import deepspeed
 
 from transformers.trainer import get_scheduler
 
@@ -158,9 +159,15 @@ def setup_training_components(args: argparse.Namespace, model: CLaRa, train_data
         scheduler_specific_kwargs={"min_lr": args.learning_rate * 0.1} if args.lr_scheduler == "cosine_with_min_lr" else {},
     )
 
+    import sys, os
+    rank = int(os.environ.get("LOCAL_RANK", 0))
+    print(f"[rank{rank}] calling strategy.prepare()...", flush=True)  # ← ADD
+
     # Prepare with strategy — scheduler passed in so DeepSpeed manages it
     model, optimizer, scheduler = strategy.prepare((model, optimizer, scheduler))
-    
+
+    print(f"[rank{rank}] strategy.prepare() DONE", flush=True)  # ← ADD
+
     return model, optimizer, scheduler, num_update_steps_per_epoch
 
 
@@ -179,11 +186,16 @@ def train(args: argparse.Namespace):
     """Main training function."""
     # Configure strategy
     strategy = get_strategy(args)
-    strategy.setup_distributed()
     
-    # Setup model
+    # CLaRa must be constructed BEFORE setup_distributed() because DeepSpeed's
+    # ZeRO-3 installs global nn.Module.__init__ hooks during dist init that
+    # intercept parameter creation and put them on the meta device — breaking
+    # CLaRa's explicit weight loading from disk inside from_pretrained().
     model = setup_model(args)
-    
+
+    # Now initialise the distributed process group and ZeRO-3 hooks
+    strategy.setup_distributed()
+
     # Configure tokenizer
     tokenizer = get_tokenizer(
         args.pretrain, 
@@ -228,6 +240,7 @@ def train(args: argparse.Namespace):
     )
 
     # Start training
+    strategy.print("Calling trainer.fit()...")  # ← ADD
     trainer.fit(args, consumed_samples, num_update_steps_per_epoch)
 
     # Save final model
@@ -308,6 +321,8 @@ def create_argument_parser() -> argparse.ArgumentParser:
     distributed_group.add_argument("--flash_attn", action="store_true", default=False, 
                                  help="Enable FlashAttention2")
     distributed_group.add_argument("--ds_tensor_parallel_size", type=int, default=1, help="DeepSpeed Tensor parallel size")
+    distributed_group.add_argument("--adam_offload", action="store_true", default=False,
+                                 help="Offload Adam optimizer states to CPU")
     # Dataset configuration
     dataset_group = parser.add_argument_group("Dataset Configuration")
     dataset_group.add_argument("--dataset", type=str, required=True, help="Training dataset path")

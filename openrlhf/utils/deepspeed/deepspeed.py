@@ -104,10 +104,17 @@ class DeepspeedStrategy(ABC):
         # mesh
         self.world_size = dist.get_world_size()
         dp_size = self.world_size // self.ring_attn_size // self.ds_tensor_parallel_size
-        self.ds_device_mesh = init_device_mesh(
-            "cuda", (dp_size, self.ring_attn_size, self.ds_tensor_parallel_size), mesh_dim_names=("dp", "sp", "tp")
-        )
-        self.setup_ring_attn(self.ds_device_mesh)
+        # CHANGED: skip device mesh for pure DP — init_device_mesh()'s split_group()
+        # call crashes/hangs on this cluster's NCCL build, and isn't needed when
+        # ring-attn and tensor-parallel are both unused (dp_size == world_size anyway).
+        if self.ring_attn_size == 1 and self.ds_tensor_parallel_size == 1:
+            self.ds_device_mesh = None
+            self.ring_attn_rank = 0
+        else:
+            self.ds_device_mesh = init_device_mesh(
+                "cuda", (dp_size, self.ring_attn_size, self.ds_tensor_parallel_size), mesh_dim_names=("dp", "sp", "tp")
+            )
+            self.setup_ring_attn(self.ds_device_mesh)
 
         self.accumulated_gradient = (
             self.train_batch_size
@@ -175,7 +182,9 @@ class DeepspeedStrategy(ABC):
     ):
         # DDP only mode, replay buffers on each rank are different.
         if sampler is None and dist.is_initialized():
-            dp_group = self.ds_device_mesh["dp"].get_group()
+            # CHANGED: ds_device_mesh may be None (see setup_distributed) — fall back
+            # to group=None, which means "whole world", same as the dp group here.
+            dp_group = self.ds_device_mesh["dp"].get_group() if self.ds_device_mesh is not None else None
             num_replicas = dist.get_world_size(group=dp_group)
             rank = dist.get_rank(group=dp_group)
 
@@ -225,34 +234,42 @@ class DeepspeedStrategy(ABC):
         return ret[0] if len(ret) == 1 else ret
 
     def _ds_init_train_model(self, model, optim, scheduler):
-        is_actor = isinstance(model, Actor)
-        ds_config = self.get_ds_train_config(is_actor)
+            import os
+            rank = int(os.environ.get("LOCAL_RANK", 0))
 
-        if self.ds_tensor_parallel_size > 1:
-            tp_model = deepspeed.tp_model_init(
-                model=model.model if is_actor else model, tp_size=self.ds_tensor_parallel_size, dtype=torch.bfloat16
+            is_actor = isinstance(model, Actor)
+            ds_config = self.get_ds_train_config(is_actor)
+
+            print(f"[rank{rank}] deepspeed.initialize() START — stage={self.stage} params={sum(p.numel() for p in model.parameters())/1e9:.2f}B", flush=True)
+
+            if self.ds_tensor_parallel_size > 1:
+                tp_model = deepspeed.tp_model_init(
+                    model=model.model if is_actor else model, tp_size=self.ds_tensor_parallel_size, dtype=torch.bfloat16
+                )
+                if is_actor:
+                    model.model = tp_model
+                else:
+                    model = tp_model
+
+            engine, optim, _, scheduler = deepspeed.initialize(
+                model=model.model if is_actor else model,
+                optimizer=optim,
+                lr_scheduler=scheduler,
+                config=ds_config,
+                args={"local_rank": int(os.environ.get("LOCAL_RANK", "-1"))},
+                dist_init_required=False,  # dist already init'd by setup_distributed()
             )
+
+            print(f"[rank{rank}] deepspeed.initialize() DONE", flush=True)
+
+            if self.deepcompile:
+                engine.compile()
             if is_actor:
-                model.model = tp_model
+                model.model = engine
             else:
-                model = tp_model
+                model = engine
 
-        engine, optim, _, scheduler = deepspeed.initialize(
-            model=model.model if is_actor else model,
-            optimizer=optim,
-            lr_scheduler=scheduler,      # back to original
-            config=ds_config,
-            args={"local_rank": int(os.environ.get("LOCAL_RANK", "-1"))},
-            dist_init_required=True,
-        )
-        if self.deepcompile:
-            engine.compile()
-        if is_actor:
-            model.model = engine
-        else:
-            model = engine
-
-        return model, optim, scheduler
+            return model, optim, scheduler
 
     def get_ds_train_config(self, is_actor):
         # DS Config
