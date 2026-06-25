@@ -27,7 +27,74 @@ vd425@vm-shell1:/vol/biomedic3/vd425/clara-main$ tree -L 4
 │   │   │   ├── tokenizer.json
 │   │   │   └── tokenizer.model
 │   │   └── README.md
-│   └── stage1
+│   ├── stage1
+│   │   ├── cr128
+│   │   │   ├── adapters.pth
+│   │   │   ├── chat_template.jinja
+│   │   │   ├── checkpoints
+│   │   │   ├── config.json
+│   │   │   ├── decoder_first_last_layers.pth
+│   │   │   ├── modeling_clara.py
+│   │   │   ├── special_tokens_map.json
+│   │   │   ├── tokenizer_config.json
+│   │   │   ├── tokenizer.json
+│   │   │   └── tokenizer.model
+│   │   ├── cr16
+│   │   │   ├── adapters.pth
+│   │   │   ├── chat_template.jinja
+│   │   │   ├── checkpoints
+│   │   │   ├── config.json
+│   │   │   ├── decoder_first_last_layers.pth
+│   │   │   ├── modeling_clara.py
+│   │   │   ├── special_tokens_map.json
+│   │   │   ├── tokenizer_config.json
+│   │   │   ├── tokenizer.json
+│   │   │   └── tokenizer.model
+│   │   ├── cr256
+│   │   │   ├── adapters.pth
+│   │   │   ├── chat_template.jinja
+│   │   │   ├── checkpoints
+│   │   │   ├── config.json
+│   │   │   ├── decoder_first_last_layers.pth
+│   │   │   ├── modeling_clara.py
+│   │   │   ├── special_tokens_map.json
+│   │   │   ├── tokenizer_config.json
+│   │   │   ├── tokenizer.json
+│   │   │   └── tokenizer.model
+│   │   ├── cr32
+│   │   │   ├── adapters.pth
+│   │   │   ├── chat_template.jinja
+│   │   │   ├── checkpoints
+│   │   │   ├── config.json
+│   │   │   ├── decoder_first_last_layers.pth
+│   │   │   ├── modeling_clara.py
+│   │   │   ├── special_tokens_map.json
+│   │   │   ├── tokenizer_config.json
+│   │   │   ├── tokenizer.json
+│   │   │   └── tokenizer.model
+│   │   ├── cr4
+│   │   │   ├── adapters.pth
+│   │   │   ├── chat_template.jinja
+│   │   │   ├── checkpoints
+│   │   │   ├── config.json
+│   │   │   ├── decoder_first_last_layers.pth
+│   │   │   ├── modeling_clara.py
+│   │   │   ├── special_tokens_map.json
+│   │   │   ├── tokenizer_config.json
+│   │   │   ├── tokenizer.json
+│   │   │   └── tokenizer.model
+│   │   └── cr64
+│   │       ├── adapters.pth
+│   │       ├── chat_template.jinja
+│   │       ├── checkpoints
+│   │       ├── config.json
+│   │       ├── decoder_first_last_layers.pth
+│   │       ├── modeling_clara.py
+│   │       ├── special_tokens_map.json
+│   │       ├── tokenizer_config.json
+│   │       ├── tokenizer.json
+│   │       └── tokenizer.model
+│   └── stage1_2
 │       ├── cr128
 │       │   ├── adapters.pth
 │       │   ├── chat_template.jinja
@@ -49,6 +116,15 @@ vd425@vm-shell1:/vol/biomedic3/vd425/clara-main$ tree -L 4
 │       │   ├── tokenizer.json
 │       │   └── tokenizer.model
 │       ├── cr256
+│       │   ├── adapters.pth
+│       │   ├── chat_template.jinja
+│       │   ├── checkpoints
+│       │   ├── config.json
+│       │   ├── decoder_first_last_layers.pth
+│       │   ├── special_tokens_map.json
+│       │   ├── tokenizer_config.json
+│       │   ├── tokenizer.json
+│       │   └── tokenizer.model
 │       ├── cr32
 │       │   ├── adapters.pth
 │       │   ├── chat_template.jinja
@@ -182,13 +258,6 @@ vd425@vm-shell1:/vol/biomedic3/vd425/clara-main$ tree -L 4
 │   │   ├── download_57926.log
 │   │   ├── download_clara_62872.log
 │   │   ├── download_clara_62877.log
-│   │   ├── download_clara_62878.log
-│   │   ├── download_clara_62879.log
-│   │   ├── download_clara_62880.log
-│   │   ├── download_clara_62881.log
-│   │   ├── download_clara_62882.log
-│   │   ├── eval_frames_61288.log
-│   │   └── ...
 │   ├── stage1_cr128_65758.log
 │   ├── stage1_cr16_65684.log
 │   ├── stage1_cr256_65672.log
@@ -268,6 +337,7 @@ vd425@vm-shell1:/vol/biomedic3/vd425/clara-main$ tree -L 4
 │   ├── requirements_clara_eval.txt
 │   ├── requirements_clean.txt
 │   ├── requirements.txt
+│   ├── requirements_uv.txt
 │   └── scripts
 │       ├── evaluation_end_to_end.sh
 │       ├── evaluation_instruction_tuning.sh
@@ -295,6 +365,18 @@ vd425@vm-shell1:/vol/biomedic3/vd425/clara-main$ tree -L 4
 │       ├── tokenizer_config.json
 │       ├── tokenizer.json
 │       └── tokenizer.model
+├── results
+│   └── latent_space_analysis
+│       ├── effective_rank_vs_cr.png
+│       ├── embeddings_cr128.npz
+│       ├── embeddings_cr16.npz
+│       ├── embeddings_cr256.npz
+│       ├── embeddings_cr32.npz
+│       ├── embeddings_cr4.npz
+│       ├── embeddings_cr64.npz
+│       ├── orthogonality_stats.json
+│       ├── tsne_across_cr.png
+│       └── tsne_by_cr.png
 └── scripts
     ├── downloads
     │   ├── download_clara_data.sh
@@ -302,15 +384,21 @@ vd425@vm-shell1:/vol/biomedic3/vd425/clara-main$ tree -L 4
     ├── eval
     │   ├── compute_metrics.py
     │   ├── eval_comp16.sh
-    │   └── eval_frames.sh
+    │   ├── eval_frames.sh
+    │   ├── latent_space_analysis.py
+    │   ├── __pycache__
+    │   │   └── latent_space_analysis.cpython-310.pyc
+    │   └── run_latent_space_analysis.sh
     ├── tests
     │   ├── check_cuda.sh
     │   ├── eval_trial.sh
     │   ├── stage1_cr4_debug.sh
     │   └── test.sh
     └── training
+        ├── stage1_2_array.sh
+        ├── stage1_2_cr4_mutiple_gpus.sh
         ├── stage1_array.sh
         ├── stage1_cr4_mutiple_gpus.sh
         └── stage1_cr4.sh
 
-76 directories, 356 files
+93 directories, 469 files

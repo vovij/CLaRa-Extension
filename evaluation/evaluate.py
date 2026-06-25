@@ -4,6 +4,9 @@
 #
 
 import os
+import sys
+sys.path = [p for p in sys.path if not p.endswith('/evaluation')]  # prevent self-import
+
 import json
 import argparse
 import gc
@@ -423,7 +426,7 @@ class DataLoader:
     """Handles data loading for different datasets and stages."""
     
     @staticmethod
-    def load_stage1_data(dataset: str, gold_retrieval: bool) -> List[Dict]:
+    def load_stage1_data(dataset: str, gold_retrieval: bool, max_samples: int = None) -> List[Dict]:
         """Load stage1 evaluation data."""
         retrieval_type = "with_pos" if gold_retrieval else "no_pos"
         file_path = f"/vol/biomedic3/vd425/clara-main/ml-clara/evaluation/evaluation_data/end_to_end_evaluation/{dataset}/eval_processed_{retrieval_type}.jsonl"
@@ -444,6 +447,9 @@ class DataLoader:
             }
             processed_data.append(processed_item)
         
+        if max_samples:
+            processed_data = processed_data[:max_samples]
+
         return processed_data
     
     @staticmethod
@@ -706,7 +712,8 @@ def main():
     parser.add_argument('--paraphrase_path', type=str, help='Path to paraphrase data')
     parser.add_argument('--mse_visulize_path', type=str, help='Path to save MSE visualization')
     parser.add_argument('--efficient_count', action='store_true', help='Count efficiency metrics')
-    
+    parser.add_argument('--max_samples', type=int, default=None, help='Limit samples for quick testing')
+
     args = parser.parse_args()
     
     # Process datasets
@@ -718,7 +725,7 @@ def main():
         
         # Load data based on stage
         if args.stage in ['stage1', 'stage1_2']:
-            processed_data = DataLoader.load_stage1_data(dataset, args.gold_retrieval)
+            processed_data = DataLoader.load_stage1_data(dataset, args.gold_retrieval, args.max_samples)
         elif args.stage == 'stage2':
             # Added FRAMES eval
             if dataset == 'frames':
