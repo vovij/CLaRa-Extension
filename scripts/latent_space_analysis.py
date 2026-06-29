@@ -1,7 +1,7 @@
 """
-Latent space analysis for the CLaRa baseline (stage1) compressor model.
+Latent space analysis for CLaRa compressor models (any training stage).
 
-Covers the two action items from the supervisor meeting:
+Covers the two action items:
   1. Visualise latent space    -> t-SNE / PCA plots of memory-token reps vs.
                                    document-token reps, faceted by compression
                                    ratio (CR).
@@ -11,20 +11,38 @@ Covers the two action items from the supervisor meeting:
 
 Usage
 -----
+  # Stage 1 (pretraining baseline) — default behaviour:
     python latent_space_analysis.py \
         --base_dir /vol/biomedic3/vd425/clara-main \
+        --stage_label stage1 \
         --crs 4 16 32 64 128 256 \
         --dataset musique \
-        --n_docs 200 \
-        --out_dir ./latent_space_results
+        --n_docs 200
+
+  # Stage 1_2 (instruction-tuned):
+    python latent_space_analysis.py \
+        --stage_label stage1_2 \
+        --crs 4 16 32 64 128 256
+
+  # Any arbitrary checkpoint tree (must contain {cr}):
+    python latent_space_analysis.py \
+        --stage_label my_experiment \
+        --ckpt_root /path/to/checkpoints/cr{cr} \
+        --out_dir   ./results/my_experiment
+
+Configurable paths / labels (all optional)
+------------------------------------------
+  --stage_label   Human-readable tag used in plot titles and output filenames.
+                  Also drives the default --ckpt_root and --out_dir when those
+                  are not set explicitly.  Default: "stage1".
+  --ckpt_root     Full template for per-CR checkpoint directories; must contain
+                  the literal string {cr}.
+                  Default: <base_dir>/checkpoints/<stage_label>/cr{cr}
+  --out_dir       Directory for all outputs (plots, JSON, .npz caches).
+                  Default: ./latent_space_results_<stage_label>
 
 Notes
 -----
-- "Baseline model" here = the stage1 checkpoints (checkpoints/stage1/cr{CR}),
-  i.e. the compressor-pretraining-only model, *before* end-to-end
-  retrieval/generation fine-tuning. Point --ckpt_root elsewhere
-  (e.g. checkpoints/CLaRa-7B-E2E/compression-{CR}) to analyse the E2E model
-  instead, using the same script.
 - This script loads ONE checkpoint at a time, extracts embeddings, frees the
   model, then moves to the next CR. This keeps peak GPU memory to a single
   7B model rather than 6 of them.
@@ -197,7 +215,7 @@ def extract_embeddings_for_cr(
 # (1) Visualisation
 # --------------------------------------------------------------------------
 
-def plot_tsne_per_cr(results: Dict[int, CREmbeddings], out_dir: str, perplexity: int = 30) -> None:
+def plot_tsne_per_cr(results: Dict[int, CREmbeddings], out_dir: str, perplexity: int = 30, stage_label: str = "stage1") -> None:
     """One t-SNE panel per CR: memory-token reps (pooled) vs. document reps."""
     import matplotlib.pyplot as plt
     from sklearn.decomposition import PCA
@@ -233,16 +251,16 @@ def plot_tsne_per_cr(results: Dict[int, CREmbeddings], out_dir: str, perplexity:
         ax.set_yticks([])
 
     axes[0][0].legend(loc="upper left", fontsize=9)
-    fig.suptitle("Latent space: memory-token reps vs. document reps, baseline (stage1) model", y=1.02)
+    fig.suptitle(f"Latent space: memory-token reps vs. document reps, {stage_label} model", y=1.02)
     fig.tight_layout()
 
-    out_path = os.path.join(out_dir, "tsne_by_cr.png")
+    out_path = os.path.join(out_dir, f"tsne_by_cr_{stage_label}.png")
     fig.savefig(out_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
     print(f"[saved] {out_path}")
 
 
-def plot_tsne_combined_across_cr(results: Dict[int, CREmbeddings], out_dir: str, perplexity: int = 30) -> None:
+def plot_tsne_combined_across_cr(results: Dict[int, CREmbeddings], out_dir: str, perplexity: int = 30, stage_label: str = "stage1") -> None:
     """
     Single t-SNE with all CRs' memory-token reps overlaid (one colour per CR),
     to see how compression ratio reshapes the latent manifold relative to
@@ -274,13 +292,13 @@ def plot_tsne_combined_across_cr(results: Dict[int, CREmbeddings], out_dir: str,
         mask = labels == cr
         ax.scatter(proj[mask, 0], proj[mask, 1], s=18, alpha=0.7, color=cmap(idx), label=f"CR {cr}x")
 
-    ax.set_title("Memory-token latent space across compression ratios")
+    ax.set_title(f"Memory-token latent space across compression ratios ({stage_label})")
     ax.set_xticks([])
     ax.set_yticks([])
     ax.legend(loc="best", fontsize=9)
     fig.tight_layout()
 
-    out_path = os.path.join(out_dir, "tsne_across_cr.png")
+    out_path = os.path.join(out_dir, f"tsne_across_cr_{stage_label}.png")
     fig.savefig(out_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
     print(f"[saved] {out_path}")
@@ -355,7 +373,7 @@ def orthogonality_stats_for_cr(
 
 
 def run_orthogonality_analysis(
-    results: Dict[int, CREmbeddings], out_dir: str, cos_threshold: float = 0.1
+    results: Dict[int, CREmbeddings], out_dir: str, cos_threshold: float = 0.1, stage_label: str = "stage1"
 ) -> None:
     table = []
     for cr in sorted(results.keys()):
@@ -370,7 +388,7 @@ def run_orthogonality_analysis(
             f"{stats['within_doc_frac_orthogonal']:.3f}"
         )
 
-    out_json = os.path.join(out_dir, "orthogonality_stats.json")
+    out_json = os.path.join(out_dir, f"orthogonality_stats_{stage_label}.json")
     with open(out_json, "w") as f:
         json.dump(table, f, indent=2)
     print(f"[saved] {out_json}")
@@ -393,10 +411,10 @@ def run_orthogonality_analysis(
     ax1.set_ylabel("Effective rank", color="#0066CC")
     ax2.set_ylabel("# components (95% variance)", color="#CC6600")
     ax1.set_xscale("log", base=2)
-    ax1.set_title("Effective dimensionality of memory-token latent space vs. CR")
+    ax1.set_title(f"Effective dimensionality of memory-token latent space vs. CR ({stage_label})")
     fig.tight_layout()
 
-    out_path = os.path.join(out_dir, "effective_rank_vs_cr.png")
+    out_path = os.path.join(out_dir, f"effective_rank_vs_cr_{stage_label}.png")
     fig.savefig(out_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
     print(f"[saved] {out_path}")
@@ -440,32 +458,46 @@ def main():
     parser = argparse.ArgumentParser(description="CLaRa latent space analysis")
     parser.add_argument("--base_dir", type=str, default="/vol/biomedic3/vd425/clara-main")
     parser.add_argument(
+        "--stage_label", type=str, default="stage1",
+        help="Human-readable tag for the training stage (e.g. stage1, stage1_2, e2e). "
+             "Used in plot titles, output filenames, and as the default checkpoint "
+             "sub-directory and output directory when those are not set explicitly.",
+    )
+    parser.add_argument(
         "--ckpt_root", type=str, default=None,
-        help="Override checkpoint root template. Must contain '{cr}'. "
-             "Default: <base_dir>/checkpoints/stage1/cr{cr} (the baseline model).",
+        help="Checkpoint root template; must contain '{cr}'. "
+             "Default: <base_dir>/checkpoints/<stage_label>/cr{cr}",
     )
     parser.add_argument("--crs", type=int, nargs="+", default=[4, 16, 32, 64, 128, 256])
     parser.add_argument("--dataset", type=str, default="musique")
     parser.add_argument("--n_docs", type=int, default=200)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--cos_threshold", type=float, default=0.1)
-    parser.add_argument("--out_dir", type=str, default="./latent_space_results")
+    parser.add_argument(
+        "--out_dir", type=str, default=None,
+        help="Output directory for plots, JSON, and embedding caches. "
+             "Default: ./latent_space_results_<stage_label>",
+    )
     parser.add_argument("--recompute", action="store_true", help="Ignore cached embeddings.")
     parser.add_argument("--device", type=str, default="cuda")
     args = parser.parse_args()
 
-    os.makedirs(args.out_dir, exist_ok=True)
+    # Derive defaults from stage_label when not explicitly provided.
+    ckpt_template = args.ckpt_root or os.path.join(
+        args.base_dir, "checkpoints", args.stage_label, "cr{cr}"
+    )
+    out_dir = args.out_dir or f"./latent_space_results_{args.stage_label}"
 
-    ckpt_template = args.ckpt_root or os.path.join(args.base_dir, "checkpoints", "stage1", "cr{cr}")
+    os.makedirs(out_dir, exist_ok=True)
 
     documents = load_documents(args.base_dir, args.dataset, args.n_docs)
     print(f"[data] loaded {len(documents)} documents from dataset='{args.dataset}'")
 
     results: Dict[int, CREmbeddings] = {}
     for cr in args.crs:
-        if not args.recompute and os.path.exists(cache_path(args.out_dir, cr)):
+        if not args.recompute and os.path.exists(cache_path(out_dir, cr)):
             print(f"[cache] loading cached embeddings for CR={cr}")
-            results[cr] = load_cache(args.out_dir, cr)
+            results[cr] = load_cache(out_dir, cr)
             continue
 
         ckpt_path = ckpt_template.format(cr=cr)
@@ -476,20 +508,20 @@ def main():
         emb = extract_embeddings_for_cr(
             ckpt_path, documents, batch_size=args.batch_size, device=args.device
         )
-        save_cache(args.out_dir, emb)
+        save_cache(out_dir, emb)
         results[cr] = emb
 
     if not results:
         raise RuntimeError("No checkpoints were successfully processed. Check --ckpt_root / --crs.")
 
     # (1) Visualisation
-    plot_tsne_per_cr(results, args.out_dir)
-    plot_tsne_combined_across_cr(results, args.out_dir)
+    plot_tsne_per_cr(results, out_dir, stage_label=args.stage_label)
+    plot_tsne_combined_across_cr(results, out_dir, stage_label=args.stage_label)
 
     # (2) Orthogonal vector counts
-    run_orthogonality_analysis(results, args.out_dir, cos_threshold=args.cos_threshold)
+    run_orthogonality_analysis(results, out_dir, cos_threshold=args.cos_threshold, stage_label=args.stage_label)
 
-    print(f"\nDone. All outputs saved to: {args.out_dir}")
+    print(f"\nDone. All outputs saved to: {out_dir}")
 
 
 if __name__ == "__main__":
