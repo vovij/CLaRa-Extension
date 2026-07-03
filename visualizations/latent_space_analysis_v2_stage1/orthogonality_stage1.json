@@ -1,0 +1,38 @@
+[
+  {
+    "mean_intra_doc_ortho_fraction": 0.01035218253968254,
+    "effective_rank_participation_ratio": 10.357656478881836,
+    "n_components_for_95pct_variance": 979,
+    "cr": 4
+  },
+  {
+    "mean_intra_doc_ortho_fraction": 0.1497083333333333,
+    "effective_rank_participation_ratio": 3.263568162918091,
+    "n_components_for_95pct_variance": 283,
+    "cr": 16
+  },
+  {
+    "mean_intra_doc_ortho_fraction": -0.09142857142857143,
+    "effective_rank_participation_ratio": 3.6966841220855713,
+    "n_components_for_95pct_variance": 218,
+    "cr": 32
+  },
+  {
+    "mean_intra_doc_ortho_fraction": -0.2025,
+    "effective_rank_participation_ratio": 3.419508934020996,
+    "n_components_for_95pct_variance": 129,
+    "cr": 64
+  },
+  {
+    "mean_intra_doc_ortho_fraction": -1.0,
+    "effective_rank_participation_ratio": 4.898963451385498,
+    "n_components_for_95pct_variance": 235,
+    "cr": 128
+  },
+  {
+    "mean_intra_doc_ortho_fraction": 1.0,
+    "effective_rank_participation_ratio": 3.03196120262146,
+    "n_components_for_95pct_variance": 135,
+    "cr": 256
+  }
+]
