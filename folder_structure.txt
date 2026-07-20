@@ -4,24 +4,34 @@ vd425@vm-shell1:/vol/biomedic3/vd425/clara-main$ tree -L 4
 ├── checkpoints
 │   ├── CLaRa-7B-E2E
 │   │   ├── compression-128
+│   │   │   ├── 2wiki_stage2_False_5.jsonl
 │   │   │   ├── adapters.pth
 │   │   │   ├── chat_template.jinja
 │   │   │   ├── config.json
 │   │   │   ├── decoder_first_last_layers.pth
+│   │   │   ├── hotpotqa_stage2_False_5.jsonl
 │   │   │   ├── modeling_clara.py
+│   │   │   ├── musique_stage2_False_5.jsonl
 │   │   │   ├── musique_stage2_True_5.jsonl
+│   │   │   ├── nq_stage2_False_5.jsonl
+│   │   │   ├── results_metrics_stage2_False_5.json
 │   │   │   ├── special_tokens_map.json
 │   │   │   ├── tokenizer_config.json
 │   │   │   ├── tokenizer.json
 │   │   │   └── tokenizer.model
 │   │   ├── compression-16
+│   │   │   ├── 2wiki_stage2_False_5.jsonl
 │   │   │   ├── adapters.pth
 │   │   │   ├── chat_template.jinja
 │   │   │   ├── config.json
 │   │   │   ├── decoder_first_last_layers.pth
 │   │   │   ├── frames_stage2_False_5.jsonl
+│   │   │   ├── hotpotqa_stage2_False_5.jsonl
 │   │   │   ├── modeling_clara.py
+│   │   │   ├── musique_stage2_False_5.jsonl
 │   │   │   ├── musique_stage2_True_5.jsonl
+│   │   │   ├── nq_stage2_False_5.jsonl
+│   │   │   ├── results_metrics_stage2_False_5.json
 │   │   │   ├── special_tokens_map.json
 │   │   │   ├── tokenizer_config.json
 │   │   │   ├── tokenizer.json
@@ -94,67 +104,126 @@ vd425@vm-shell1:/vol/biomedic3/vd425/clara-main$ tree -L 4
 │   │       ├── tokenizer_config.json
 │   │       ├── tokenizer.json
 │   │       └── tokenizer.model
-│   └── stage1_2
+│   ├── stage1_2
+│   │   ├── cr128
+│   │   │   ├── adapters.pth
+│   │   │   ├── chat_template.jinja
+│   │   │   ├── checkpoints
+│   │   │   ├── config.json
+│   │   │   ├── decoder_first_last_layers.pth
+│   │   │   ├── modeling_clara.py -> /vol/biomedic3/vd425/clara-main/checkpoints/stage1/cr128/modeling_clara.py
+│   │   │   ├── special_tokens_map.json
+│   │   │   ├── tokenizer_config.json
+│   │   │   ├── tokenizer.json
+│   │   │   └── tokenizer.model
+│   │   ├── cr16
+│   │   │   ├── adapters.pth
+│   │   │   ├── chat_template.jinja
+│   │   │   ├── checkpoints
+│   │   │   ├── config.json
+│   │   │   ├── decoder_first_last_layers.pth
+│   │   │   ├── modeling_clara.py -> /vol/biomedic3/vd425/clara-main/checkpoints/stage1/cr16/modeling_clara.py
+│   │   │   ├── nq_stage1_2_False_5.jsonl
+│   │   │   ├── special_tokens_map.json
+│   │   │   ├── tokenizer_config.json
+│   │   │   ├── tokenizer.json
+│   │   │   └── tokenizer.model
+│   │   ├── cr256
+│   │   │   ├── adapters.pth
+│   │   │   ├── chat_template.jinja
+│   │   │   ├── checkpoints
+│   │   │   ├── config.json
+│   │   │   ├── decoder_first_last_layers.pth
+│   │   │   ├── modeling_clara.py -> /vol/biomedic3/vd425/clara-main/checkpoints/stage1/cr256/modeling_clara.py
+│   │   │   ├── special_tokens_map.json
+│   │   │   ├── tokenizer_config.json
+│   │   │   ├── tokenizer.json
+│   │   │   └── tokenizer.model
+│   │   ├── cr32
+│   │   │   ├── adapters.pth
+│   │   │   ├── chat_template.jinja
+│   │   │   ├── checkpoints
+│   │   │   ├── config.json
+│   │   │   ├── decoder_first_last_layers.pth
+│   │   │   ├── modeling_clara.py -> /vol/biomedic3/vd425/clara-main/checkpoints/stage1/cr32/modeling_clara.py
+│   │   │   ├── special_tokens_map.json
+│   │   │   ├── tokenizer_config.json
+│   │   │   ├── tokenizer.json
+│   │   │   └── tokenizer.model
+│   │   ├── cr4
+│   │   │   ├── 2wiki_stage1_2_False_5.jsonl
+│   │   │   ├── 2wiki_stage1_2_True_5.jsonl
+│   │   │   ├── adapters.pth
+│   │   │   ├── chat_template.jinja
+│   │   │   ├── checkpoints
+│   │   │   ├── config.json
+│   │   │   ├── decoder_first_last_layers.pth
+│   │   │   ├── hotpotqa_stage1_2_False_5.jsonl
+│   │   │   ├── hotpotqa_stage1_2_True_5.jsonl
+│   │   │   ├── modeling_clara.py -> /vol/biomedic3/vd425/clara-main/checkpoints/stage1/cr4/modeling_clara.py
+│   │   │   ├── musique_stage1_2_False_5.jsonl
+│   │   │   ├── musique_stage1_2_True_5.jsonl
+│   │   │   ├── nq_stage1_2_False_5.jsonl
+│   │   │   ├── nq_stage1_2_True_5.jsonl
+│   │   │   ├── results_metrics_stage1_2_False_5.json
+│   │   │   ├── results_metrics_stage1_2_True_5.json
+│   │   │   ├── special_tokens_map.json
+│   │   │   ├── tokenizer_config.json
+│   │   │   ├── tokenizer.json
+│   │   │   └── tokenizer.model
+│   │   └── cr64
+│   │       ├── adapters.pth
+│   │       ├── chat_template.jinja
+│   │       ├── checkpoints
+│   │       ├── config.json
+│   │       ├── decoder_first_last_layers.pth
+│   │       ├── modeling_clara.py -> /vol/biomedic3/vd425/clara-main/checkpoints/stage1/cr64/modeling_clara.py
+│   │       ├── special_tokens_map.json
+│   │       ├── tokenizer_config.json
+│   │       ├── tokenizer.json
+│   │       └── tokenizer.model
+│   └── stage2
 │       ├── cr128
-│       │   ├── adapters.pth
-│       │   ├── chat_template.jinja
-│       │   ├── checkpoints
-│       │   ├── config.json
-│       │   ├── decoder_first_last_layers.pth
-│       │   ├── special_tokens_map.json
-│       │   ├── tokenizer_config.json
-│       │   ├── tokenizer.json
-│       │   └── tokenizer.model
 │       ├── cr16
 │       │   ├── adapters.pth
 │       │   ├── chat_template.jinja
 │       │   ├── checkpoints
 │       │   ├── config.json
 │       │   ├── decoder_first_last_layers.pth
+│       │   ├── modeling_clara.py
 │       │   ├── special_tokens_map.json
 │       │   ├── tokenizer_config.json
 │       │   ├── tokenizer.json
 │       │   └── tokenizer.model
 │       ├── cr256
-│       │   ├── adapters.pth
-│       │   ├── chat_template.jinja
-│       │   ├── checkpoints
-│       │   ├── config.json
-│       │   ├── decoder_first_last_layers.pth
-│       │   ├── special_tokens_map.json
-│       │   ├── tokenizer_config.json
-│       │   ├── tokenizer.json
-│       │   └── tokenizer.model
 │       ├── cr32
 │       │   ├── adapters.pth
 │       │   ├── chat_template.jinja
 │       │   ├── checkpoints
 │       │   ├── config.json
 │       │   ├── decoder_first_last_layers.pth
+│       │   ├── modeling_clara.py
 │       │   ├── special_tokens_map.json
 │       │   ├── tokenizer_config.json
 │       │   ├── tokenizer.json
 │       │   └── tokenizer.model
 │       ├── cr4
+│       │   ├── 2wiki_stage2_False_5.jsonl
 │       │   ├── adapters.pth
 │       │   ├── chat_template.jinja
 │       │   ├── checkpoints
 │       │   ├── config.json
 │       │   ├── decoder_first_last_layers.pth
+│       │   ├── hotpotqa_stage2_False_5.jsonl
+│       │   ├── modeling_clara.py
+│       │   ├── musique_stage2_False_5.jsonl
+│       │   ├── nq_stage2_False_5.jsonl
+│       │   ├── results_metrics_stage2_False_5.json
 │       │   ├── special_tokens_map.json
 │       │   ├── tokenizer_config.json
 │       │   ├── tokenizer.json
 │       │   └── tokenizer.model
 │       └── cr64
-│           ├── adapters.pth
-│           ├── chat_template.jinja
-│           ├── checkpoints
-│           ├── config.json
-│           ├── decoder_first_last_layers.pth
-│           ├── special_tokens_map.json
-│           ├── tokenizer_config.json
-│           ├── tokenizer.json
-│           └── tokenizer.model
 ├── data
 │   ├── clara_logo.jpg
 │   ├── e2e_eval_2wiki_no_pos
@@ -258,15 +327,7 @@ vd425@vm-shell1:/vol/biomedic3/vd425/clara-main$ tree -L 4
 │   │   ├── download_57926.log
 │   │   ├── download_clara_62872.log
 │   │   ├── download_clara_62877.log
-│   ├── stage1_cr128_65758.log
-│   ├── stage1_cr16_65684.log
-│   ├── stage1_cr256_65672.log
-│   ├── stage1_cr32_65703.log
-│   ├── stage1_cr4_multiple_65583.log
-│   ├── stage1_cr4_multiple_65584.log
-│   ├── stage1_cr4_multiple_65598.log
-│   ├── stage1_cr4_multiple_65600.log
-│   └── stage1_cr64_65718.log
+│   │   └──...
 ├── ml-clara
 │   ├── ACKNOWLEDGEMENTS
 │   ├── CODE_OF_CONDUCT.md
@@ -366,29 +427,79 @@ vd425@vm-shell1:/vol/biomedic3/vd425/clara-main$ tree -L 4
 │       ├── tokenizer.json
 │       └── tokenizer.model
 ├── results
-│   └── latent_space_analysis
-│       ├── effective_rank_vs_cr.png
-│       ├── embeddings_cr128.npz
-│       ├── embeddings_cr16.npz
-│       ├── embeddings_cr256.npz
-│       ├── embeddings_cr32.npz
-│       ├── embeddings_cr4.npz
-│       ├── embeddings_cr64.npz
-│       ├── orthogonality_stats.json
-│       ├── tsne_across_cr.png
-│       └── tsne_by_cr.png
+│   ├── latent_space_analysis
+│   │   ├── effective_rank_vs_cr.png
+│   │   ├── embeddings_cr128.npz
+│   │   ├── embeddings_cr16.npz
+│   │   ├── embeddings_cr256.npz
+│   │   ├── embeddings_cr32.npz
+│   │   ├── embeddings_cr4.npz
+│   │   ├── embeddings_cr64.npz
+│   │   ├── orthogonality_stats.json
+│   │   ├── tsne_across_cr.png
+│   │   └── tsne_by_cr.png
+│   ├── latent_space_analysis_stage1_2
+│   │   ├── effective_rank_vs_cr_stage1_2.png
+│   │   ├── embeddings_cr128.npz
+│   │   ├── embeddings_cr16.npz
+│   │   ├── embeddings_cr256.npz
+│   │   ├── embeddings_cr32.npz
+│   │   ├── embeddings_cr4.npz
+│   │   ├── embeddings_cr64.npz
+│   │   ├── orthogonality_stats_stage1_2.json
+│   │   ├── tsne_across_cr_stage1_2.png
+│   │   └── tsne_by_cr_stage1_2.png
+│   └── latent_space_v2
+│       ├── stage1
+│       │   ├── compression_across_cr_pca_stage1.png
+│       │   ├── compression_across_cr_tsne_stage1.png
+│       │   ├── compression_across_cr_umap_stage1.png
+│       │   ├── compression_slots_pca_stage1.png
+│       │   ├── compression_slots_tsne_stage1.png
+│       │   ├── compression_slots_umap_stage1.png
+│       │   ├── embeddings_cr128.npz
+│       │   ├── embeddings_cr16.npz
+│       │   ├── embeddings_cr256.npz
+│       │   ├── embeddings_cr32.npz
+│       │   ├── embeddings_cr4.npz
+│       │   ├── embeddings_cr64.npz
+│       │   ├── orthogonality_stage1.json
+│       │   └── pca_variance_stage1.png
+│       └── stage1_2
+│           ├── compression_across_cr_pca_stage1_2.png
+│           ├── compression_across_cr_tsne_stage1_2.png
+│           ├── compression_across_cr_umap_stage1_2.png
+│           ├── compression_slots_pca_stage1_2.png
+│           ├── compression_slots_tsne_stage1_2.png
+│           ├── compression_slots_umap_stage1_2.png
+│           ├── embeddings_cr128.npz
+│           ├── embeddings_cr16.npz
+│           ├── embeddings_cr256.npz
+│           ├── embeddings_cr32.npz
+│           ├── embeddings_cr4.npz
+│           ├── embeddings_cr64.npz
+│           ├── orthogonality_stage1_2.json
+│           └── pca_variance_stage1_2.png
 └── scripts
     ├── downloads
     │   ├── download_clara_data.sh
     │   └── download_models.sh
     ├── eval
     │   ├── compute_metrics.py
+    │   ├── eval_comp128.sh
     │   ├── eval_comp16.sh
+    │   ├── eval_comp16_trial.sh
+    │   ├── eval_e2e_cr4.sh
     │   ├── eval_frames.sh
+    │   ├── eval_stage1_2_array.sh
     │   ├── latent_space_analysis.py
+    │   ├── latent_space_analysis_v2.py
     │   ├── __pycache__
     │   │   └── latent_space_analysis.cpython-310.pyc
-    │   └── run_latent_space_analysis.sh
+    │   ├── run_latent_space_analysis_stage1_2.sh
+    │   ├── run_latent_space_analysis_stage1_2_v2.sh
+    │   ├── run_latent_space_analysis_stage1.sh
+    │   └── run_latent_space_analysis_stage1_v2.sh
     ├── tests
     │   ├── check_cuda.sh
     │   ├── eval_trial.sh
@@ -399,6 +510,6 @@ vd425@vm-shell1:/vol/biomedic3/vd425/clara-main$ tree -L 4
         ├── stage1_2_cr4_mutiple_gpus.sh
         ├── stage1_array.sh
         ├── stage1_cr4_mutiple_gpus.sh
-        └── stage1_cr4.sh
-
-93 directories, 469 files
+        ├── stage1_cr4.sh
+        ├── stage2_array.sh
+        └── stage2_cr4_mutiple_gpus.sh
