@@ -2,6 +2,7 @@
 # For licensing see accompanying LICENSE file.
 # Copyright (C) 2025 Apple Inc. All Rights Reserved.
 #
+from openrlhf.models.temporal_link_matrix import TemporalLinkMatrix, multi_hop_propagate
 
 import warnings
 import os
@@ -159,6 +160,10 @@ class CLaRaConfig(PretrainedConfig):
                  ae_mode: str = "token",
                  max_new_tokens: int = 128,
                  stage2_retrieval_top_n: int = 1,
+                 use_kg_retrieval: bool = False,
+                 kg_rank: int = 64,
+                 kg_hops: int = 2,
+                 kg_damping: float = 0.5,
                  load_pretrained_checkpoint: bool = False,
                  device_map=None,
                  auto_map: dict = {
@@ -204,6 +209,12 @@ class CLaRaConfig(PretrainedConfig):
         self.generation_top_k = generation_top_k
         self.stage2_retrieval_top_n = stage2_retrieval_top_n
         
+        # multi-hop KG extension
+        self.use_kg_retrieval = use_kg_retrieval
+        self.kg_rank = kg_rank
+        self.kg_hops = kg_hops
+        self.kg_damping = kg_damping
+
         if training_form == 'compressor':
             assert compr_model_name is not None and not self.lora
 
@@ -339,6 +350,21 @@ class CLaRa(PreTrainedModel):
         self.n_mem_tokens = self.doc_max_length // self.compr_rate
         self.hidden_size = self.decoder.config.hidden_size
         
+        # --- multi-hop KG extension ---
+        self.use_kg_retrieval = getattr(cfg, 'use_kg_retrieval', False)
+        self.kg_hops = getattr(cfg, 'kg_hops', 2)
+        self.kg_damping = getattr(cfg, 'kg_damping', 0.5)
+        if self.use_kg_retrieval:
+            flattened_doc_dim = self.n_mem_tokens * self.hidden_size  # matches the
+            # .reshape(B, stage2_retrieval_top_n, -1) flattening already done in
+            # _forward_stage2_batch -- NOT self.hidden_size alone.
+            self.link_module = TemporalLinkMatrix(
+                hidden_dim=flattened_doc_dim, rank=getattr(cfg, 'kg_rank', 64)
+            )
+        else:
+            self.link_module = None
+        # --- end multi-hop KG extension ---
+
         # Setup adapters and memory token optimization
         if self.lora:
             self._setup_adapter_training()
@@ -1205,6 +1231,10 @@ class CLaRa(PreTrainedModel):
                 os.path.join(save_directory, "decoder_first_last_layers.pth")
             )
             
+            # Temporal Link Matrix addition
+            if self.use_kg_retrieval:
+                torch.save(self.link_module.state_dict(), os.path.join(save_directory, "link_module.pth"))
+
             # Save configuration
             self.config.save_pretrained(save_directory)
         else:
@@ -1266,6 +1296,16 @@ class CLaRa(PreTrainedModel):
                 for key in first_and_last_decoder_state_dict:
                     assert key in model.decoder.state_dict()
                 model.decoder.load_state_dict(first_and_last_decoder_state_dict, strict=False)
+                # Temporal Link Matrix addition
+                if model.use_kg_retrieval:
+                    link_module_path = os.path.join(pretrained_model_name_or_path, "link_module.pth")
+                    if os.path.exists(link_module_path):
+                        model.link_module.load_state_dict(
+                            torch.load(link_module_path, map_location=map_location, weights_only=True)
+                        )
+                    else:
+                        print(f'use_kg_retrieval=True but no link_module.pth at {link_module_path} '
+                            f'-- using random init (expected for a fresh KG run)')
             else:
                 print(f'First and last layer not found: {first_and_last_layers_path}')
 
@@ -1455,9 +1495,24 @@ class CLaRa(PreTrainedModel):
                 F.normalize(retrieved_doc_embeddings, dim=-1, p=2).float().transpose(1, 2)
             ).squeeze(1)
             
+            if self.use_kg_retrieval:
+                cand_mask = torch.ones(B, stage2_retrieval_top_n, dtype=torch.bool, device=scores.device)
+                L = self.link_module(retrieved_doc_embeddings.float(), query_reps.float(), cand_mask)
+                scores_for_topk = multi_hop_propagate(
+                    scores.float(), L, hops=self.kg_hops, damping=self.kg_damping
+                ).to(scores.dtype)
+            else:
+                scores_for_topk = scores
+
+            z, topk_idx = differentiable_topk(scores_for_topk, self.generation_top_k, temperature=0.02)
+            selected = torch.einsum('bkn,bnd->bkd', z.to(retrieved_doc_embeddings.dtype), retrieved_doc_embeddings)
+            selected = selected.view(selected.size(0) * selected.size(1), -1, self.hidden_size)
+
+            """ Before Temporal Link Matrix update
             z, topk_idx = differentiable_topk(scores, self.generation_top_k, temperature=0.02)
             selected = torch.einsum('bkn,bnd->bkd', z.to(retrieved_doc_embeddings.dtype), retrieved_doc_embeddings)
             selected = selected.view(selected.size(0) * selected.size(1), -1, self.hidden_size)
+            """
 
         inputs_embeds = self._replace_emb_stage2(selected, dec_input_ids)
         

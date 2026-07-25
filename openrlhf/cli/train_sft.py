@@ -50,6 +50,10 @@ def create_clara_config(args: argparse.Namespace) -> CLaRaConfig:
         sep=True,
         attn_implementation='sdpa',
         stage2_retrieval_top_n=args.stage2_retrieval_top_n,
+        use_kg_retrieval=args.use_kg_retrieval,
+        kg_rank=args.kg_rank,
+        kg_hops=args.kg_hops,
+        kg_damping=args.kg_damping,
         pure_inference=args.pure_inference
     )
 
@@ -65,7 +69,8 @@ def setup_model(args: argparse.Namespace) -> CLaRa:
             training_stage=args.stage,
             generation_top_k=args.generation_top_k,
             doc_max_length=args.doc_max_length,
-            compress_rate=args.compress_rate
+            compress_rate=args.compress_rate,
+            use_kg_retrieval=args.use_kg_retrieval,
         )
     else:
         print("Initializing new model")
@@ -272,6 +277,15 @@ def create_argument_parser() -> argparse.ArgumentParser:
                             help="Use MIPS for stage2 retrieval")
     clara_group.add_argument("--stage2_retrieval_top_n", type=int, default=1, 
                             help="Top-n documents for stage2 retrieval")
+    # Multi hop KG retrieval
+    clara_group.add_argument("--use_kg_retrieval", action="store_true", default=False,
+                            help="Enable multi-hop temporal-link-matrix retrieval")
+    clara_group.add_argument("--kg_rank", type=int, default=64,
+                            help="Low-rank projection dim for the link matrix")
+    clara_group.add_argument("--kg_hops", type=int, default=2,
+                            help="Propagation hops (2 for HotpotQA/2Wiki, up to 4 for MuSiQue)")
+    clara_group.add_argument("--kg_damping", type=float, default=0.5,
+                            help="Damping factor a in [0,1]; a=0 recovers the baseline pipeline exactly")
     clara_group.add_argument("--mse_loss", action="store_true", default=False, 
                             help="Add MSE loss during compression training")
     clara_group.add_argument("--do_eval_gen", action="store_true", default=False, 
