@@ -71,6 +71,10 @@ def setup_model(args: argparse.Namespace) -> CLaRa:
             doc_max_length=args.doc_max_length,
             compress_rate=args.compress_rate,
             use_kg_retrieval=args.use_kg_retrieval,
+            stage2_retrieval_top_n=args.stage2_retrieval_top_n,
+            kg_rank=args.kg_rank,
+            kg_hops=args.kg_hops,
+            kg_damping=args.kg_damping,
         )
     else:
         print("Initializing new model")

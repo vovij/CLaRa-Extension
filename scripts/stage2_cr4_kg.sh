@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --partition=gpus48
-#SBATCH --gres=gpu:4
+#SBATCH --gres=gpu:8
 #SBATCH --output=/vol/biomedic3/vd425/clara-main/logs/stage2_cr4_kg_%j.log
 #SBATCH --time=4-11:59:00
 #SBATCH --job-name=clara_stage2_cr4_kg

@@ -33,7 +33,14 @@ export PYTHONPATH=$BASE_DIR/ml-clara:$CKPT_PATH
 # One-line pre-flight check, cheap and fast (no GPU touched), confirming
 # use_kg_retrieval actually made it into this checkpoint's config.json
 # before spending a 4-GPU allocation on it.
-python -c "import json; cfg = json.load(open('$CKPT_PATH/config.json')); assert cfg.get('use_kg_retrieval') is True, f'use_kg_retrieval={cfg.get(\"use_kg_retrieval\")} -- aborting'; print('OK: KG config confirmed, kg_rank=%s kg_hops=%s kg_damping=%s' % (cfg.get('kg_rank'), cfg.get('kg_hops'), cfg.get('kg_damping')))"
+python -c "
+import json
+cfg = json.load(open('$CKPT_PATH/config.json'))
+assert cfg.get('use_kg_retrieval') is True, f'use_kg_retrieval={cfg.get(\"use_kg_retrieval\")} -- aborting'
+assert cfg.get('stage2_retrieval_top_n') == 100, f'stage2_retrieval_top_n={cfg.get(\"stage2_retrieval_top_n\")} (expected 100) -- aborting'
+print('OK: KG config confirmed, stage2_retrieval_top_n=%s kg_rank=%s kg_hops=%s kg_damping=%s' % (
+    cfg.get('stage2_retrieval_top_n'), cfg.get('kg_rank'), cfg.get('kg_hops'), cfg.get('kg_damping')))
+"
 
 accelerate launch \
     --num_processes=4 \

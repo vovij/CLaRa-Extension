@@ -453,7 +453,7 @@ class DataLoader:
         return processed_data
     
     @staticmethod
-    def load_stage2_data(dataset: str, gold_retrieval: bool) -> List[Dict]:
+    def load_stage2_data(dataset: str, gold_retrieval: bool, max_samples: int = None) -> List[Dict]:
         """Load stage2 evaluation data."""
         retrieval_type = "with_pos" if gold_retrieval else "no_pos"
         file_path = f"/vol/biomedic3/vd425/clara-main/ml-clara/evaluation/evaluation_data/end_to_end_evaluation/{dataset}/eval_processed_{retrieval_type}.jsonl"
@@ -470,6 +470,9 @@ class DataLoader:
                     'pos_index': item['pos_index']
                 }
                 processed_data.append(processed_item)
+        
+        if max_samples:
+            processed_data = processed_data[:max_samples]
         
         return processed_data
     
@@ -731,7 +734,7 @@ def main():
             if dataset == 'frames':
                 processed_data = DataLoader.load_frames_data()
             else:
-                processed_data = DataLoader.load_stage2_data(dataset, args.gold_retrieval)
+                processed_data = DataLoader.load_stage2_data(dataset, args.gold_retrieval, args.max_samples)
         elif args.stage in ['stage1_paraphrase', 'stage1_mse_visulize']:
             if not args.paraphrase_path:
                 raise ValueError(f"--paraphrase_path required for stage {args.stage}")
