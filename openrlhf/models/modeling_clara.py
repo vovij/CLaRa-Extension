@@ -714,8 +714,17 @@ class CLaRa(PreTrainedModel):
                     F.normalize(query_reps, dim=-1, p=2).unsqueeze(1).float(),
                     F.normalize(retrieved_doc_embeddings, dim=-1, p=2).float().transpose(1, 2)
                 ).squeeze(1)
-                
-                z, topk_idx = differentiable_topk(scores, self.generation_top_k, temperature=0.02)
+
+                if self.use_kg_retrieval and self.link_module is not None:
+                    cand_mask = torch.ones(B, stage2_retrieval_top_n, dtype=torch.bool, device=scores.device)
+                    L = self.link_module(retrieved_doc_embeddings.float(), query_reps.float(), cand_mask)
+                    scores_for_topk = multi_hop_propagate(
+                        scores.float(), L, hops=self.kg_hops, damping=self.kg_damping
+                    ).to(scores.dtype)
+                else:
+                    scores_for_topk = scores
+
+                z, topk_idx = differentiable_topk(scores_for_topk, self.generation_top_k, temperature=0.02)
                 selected_doc_embeddings = torch.einsum('bkn,bnd->bkd', z.to(retrieved_doc_embeddings.dtype), retrieved_doc_embeddings)
                 selected_doc_embeddings = selected_doc_embeddings.view(
                     selected_doc_embeddings.size(0) * selected_doc_embeddings.size(1), 
