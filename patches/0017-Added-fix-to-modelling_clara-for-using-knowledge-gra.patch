@@ -1,0 +1,1201 @@
+From 7549c157fe04bd6bab4f221cdfc601c02064140c Mon Sep 17 00:00:00 2001
+From: vovij <ap22292@qmul.ac.uk>
+Date: Tue, 4 Aug 2026 11:08:13 +0100
+Subject: [PATCH 17/17] Added fix to modelling_clara for using knowledge graph,
+ scripts for evaluating different hyperparameters on kg and results checking.
+
+---
+ .DS_Store                          | Bin 8196 -> 10244 bytes
+ openrlhf/models/modeling_clara.py  |  13 +-
+ scripts/build_metrics_table.py     | 364 +++++++++++++++++++++++++++++
+ scripts/check_kg_results.py        |  97 ++++++++
+ scripts/eval_e2e_kg_array.sh       |  66 ++++++
+ scripts/stage2_kg_array.sh         | 164 +++++++++++++
+ scripts/summarize_kg_sweep.py      | 212 +++++++++++++++++
+ scripts/sweep_hops_damping_12.sh   |  92 ++++++++
+ scripts/sweep_hops_damping_full.sh |  91 ++++++++
+ 9 files changed, 1097 insertions(+), 2 deletions(-)
+ create mode 100644 scripts/build_metrics_table.py
+ create mode 100644 scripts/check_kg_results.py
+ create mode 100644 scripts/eval_e2e_kg_array.sh
+ create mode 100644 scripts/stage2_kg_array.sh
+ create mode 100644 scripts/summarize_kg_sweep.py
+ create mode 100644 scripts/sweep_hops_damping_12.sh
+ create mode 100644 scripts/sweep_hops_damping_full.sh
+
+diff --git a/.DS_Store b/.DS_Store
+index a06b8deea171c8fb7fb1495f011bb323276846b4..0c71250e3fc18b90421dfe73c7cf1f6619bcfaa0 100644
+GIT binary patch
+delta 236
+zcmZp1XbF&DU|?W$DortDU{C-uIe-{M3-C-#6q~50$Y{JVU^hRb@n#-@AV!X~l;Y&1
+z{QR8Bxq{N0;{;6@nY<b%9}tq-yiRBW6I1x?%?_ejj7)1EPhKM?$0m6DX4DUX$rr>F
+z5KNKDT;jY;%nK$<ioe^KIgfo}fxRFz&^jPc;06+|Ae%QPerKM{FB2%j1aXfBNScv>
+U!2m>0E|BS)d|xD<MB7dP0G2*MX#fBK
+
+delta 254
+zcmZn(XmOBWU|?W$DortDU;r^WfEYvza8FDWo2aMAXtXh4H$S7%W*&hc#?6g_CX7s;
+zzb5w!No+nZG>M5R<of1h(JV$L&dHO{i^=I^1g(vp!gazCXaGAyF+(y#5kn?J0YeEx
+zac+K!OHxjL637aOs>zb#icCxoCfkU=6J!Po1AzoLkZ=WAzA^DT^JIRNKn_NTlNct)
+T^Gu(7ON4i_zNis(Y<&#?m>NJg
+
+diff --git a/openrlhf/models/modeling_clara.py b/openrlhf/models/modeling_clara.py
+index 8709dbe..fc18445 100644
+--- a/openrlhf/models/modeling_clara.py
++++ b/openrlhf/models/modeling_clara.py
+@@ -714,8 +714,17 @@ class CLaRa(PreTrainedModel):
+                     F.normalize(query_reps, dim=-1, p=2).unsqueeze(1).float(),
+                     F.normalize(retrieved_doc_embeddings, dim=-1, p=2).float().transpose(1, 2)
+                 ).squeeze(1)
+-                
+-                z, topk_idx = differentiable_topk(scores, self.generation_top_k, temperature=0.02)
++
++                if self.use_kg_retrieval and self.link_module is not None:
++                    cand_mask = torch.ones(B, stage2_retrieval_top_n, dtype=torch.bool, device=scores.device)
++                    L = self.link_module(retrieved_doc_embeddings.float(), query_reps.float(), cand_mask)
++                    scores_for_topk = multi_hop_propagate(
++                        scores.float(), L, hops=self.kg_hops, damping=self.kg_damping
++                    ).to(scores.dtype)
++                else:
++                    scores_for_topk = scores
++
++                z, topk_idx = differentiable_topk(scores_for_topk, self.generation_top_k, temperature=0.02)
+                 selected_doc_embeddings = torch.einsum('bkn,bnd->bkd', z.to(retrieved_doc_embeddings.dtype), retrieved_doc_embeddings)
+                 selected_doc_embeddings = selected_doc_embeddings.view(
+                     selected_doc_embeddings.size(0) * selected_doc_embeddings.size(1), 
+diff --git a/scripts/build_metrics_table.py b/scripts/build_metrics_table.py
+new file mode 100644
+index 0000000..8ef9f70
+--- /dev/null
++++ b/scripts/build_metrics_table.py
+@@ -0,0 +1,364 @@
++#!/usr/bin/env python3
++"""
++Recursively find results_metrics_*.json files anywhere under a directory and
++build a comparison table (F1 / EM / R@1 / R@3 / R@5, etc.) across whatever
++checkpoints/folders you point it at.
++
++No assumptions about folder naming (cr4, cr16, ..., or anything else) -- it
++just walks the tree, finds every matching JSON file, and by default labels
++each row with its path starting right after the "checkpoints" folder (e.g.
++"stage2/cr4", "stage2_kg/cr16", "stage2_kg_sweep_full/hops2_damp0.5") so two
++runs that happen to share a folder name (cr4 under stage2/ vs cr4 under
++stage2_kg/) never collide or get silently merged, and the label stays the
++same regardless of exactly where --root points. See --anchor to change which
++folder name it anchors on, and --label_from_parts / --label_regex if you
++want a shorter or custom label instead.
++
++Each results_metrics_*.json file is expected to look like:
++
++    {
++        "nq":        {"f1": ..., "em": ..., "recall@1": ..., "recall@3": ..., "recall@5": ..., ...},
++        "hotpotqa":  {...},
++        "musique":   {...},
++        "2wiki":     {...}
++    }
++
++Usage
++-----
++# Point it anywhere under checkpoints/ -- labels always start right after
++# "checkpoints" regardless of where --root itself points, e.g. "stage2_kg/cr4"
++# even when --root is .../checkpoints/stage2_kg (not just "cr4")
++python3 build_metrics_table.py --root /vol/biomedic3/vd425/clara-main/checkpoints/stage2_kg
++
++# Search the whole checkpoints tree -- labels become "stage2/cr4",
++# "stage2_kg/cr16", "stage2_kg_sweep_full/hops2_damp0.5", "CLaRa-7B-E2E", etc.
++python3 build_metrics_table.py --root /vol/biomedic3/vd425/clara-main/checkpoints \
++    --out_csv all_checkpoints_metrics.csv
++
++# Your folder isn't literally named "checkpoints"? Point --anchor at whatever
++# it's actually called, e.g. --anchor runs
++python3 build_metrics_table.py --root /some/other/path/runs --anchor runs
++
++# Only match a specific metrics filename pattern
++python3 build_metrics_table.py --root ./checkpoints --pattern "results_metrics_stage2_False_5.json"
++
++# Per-dataset breakdown instead of averaging across datasets
++python3 build_metrics_table.py --root ./checkpoints --per_dataset
++
++# Show percentages instead of fractions
++python3 build_metrics_table.py --root ./checkpoints --percent
++
++# Want a SHORTER label instead of the full path? Use --label_from_parts to
++# cap how many trailing path components are kept, e.g. 1 -> just "cr4"
++# (this brings back the old collision risk between same-named folders, so
++# only use it when you know the run names are unique on their own)
++python3 build_metrics_table.py --root ./checkpoints --label_from_parts 1
++"""
++
++
++import argparse
++import json
++import re
++import sys
++from pathlib import Path
++
++try:
++    import pandas as pd
++except ImportError:
++    print("This script requires pandas. Install with: pip install pandas", file=sys.stderr)
++    raise
++
++METRIC_COLS = ["f1", "em", "recall@1", "recall@3", "recall@5"]
++
++
++def natural_sort_key(label: str):
++    """
++    Sort labels containing numbers naturally (cr4 < cr16 < cr32 ...) instead
++    of alphabetically (cr128 < cr16 < cr32 ...). Falls back to plain string
++    sort for labels with no digits.
++    """
++    parts = [p for p in re.split(r"(\d+)", label) if p != ""]
++    # Wrap each part as (0, int) or (1, str) so tuples of different lengths/types
++    # remain comparable to each other (e.g. "cr4" vs "cr64/seed_0").
++    return tuple((0, int(p)) if p.isdigit() else (1, p) for p in parts)
++
++
++def anchored_parts(json_path: Path, root: Path, anchor: str):
++    """
++    Return the parent-folder path components to use for labeling, anchored
++    right after the last folder named `anchor` anywhere in the full path --
++    not relative to --root. This keeps labels stable regardless of exactly
++    where --root points: whether --root is .../checkpoints or
++    .../checkpoints/stage2_kg, a cr4 run under stage2_kg/ always labels as
++    "stage2_kg/cr4", never just "cr4".
++
++    Falls back to the path relative to --root (old behavior) if `anchor`
++    doesn't appear anywhere in the path.
++    """
++    all_parts = json_path.parts[:-1]  # drop the filename itself
++    if anchor:
++        # search from the right so the LAST occurrence of the anchor name wins,
++        # in case it appears more than once in the path
++        for i in range(len(all_parts) - 1, -1, -1):
++            if all_parts[i] == anchor:
++                return all_parts[i + 1:]
++    # anchor not found (or not set) -- fall back to relative-to-root
++    return json_path.relative_to(root).parts[:-1]
++
++
++def make_label(json_path: Path, root: Path, label_from_parts: int, label_regex: str, anchor: str):
++    """
++    Decide what to call this run/checkpoint in the table.
++
++    Priority:
++      1. --label_regex, if given and it matches: first capture group matched
++         against the full path is used as the label.
++      2. --label_from_parts N, if given (N > 0): join only the last N path
++         components before the filename, e.g. N=1 -> "cr4" instead of the
++         full "stage2_kg/cr4". Useful for shortening labels when you already
++         know they're unique on their own.
++      3. Default (label_from_parts not given, i.e. 0): use the path starting
++         right after the last folder named `anchor` (default "checkpoints")
++         anywhere in the full path, e.g. "stage2/cr4", "stage2_kg/cr16",
++         "stage2_kg_sweep_full/hops2_damp0.5" -- so the exact location under
++         checkpoints/ is always visible in the table, stays the same no
++         matter where --root points, and nothing collides.
++    """
++    parent_parts = anchored_parts(json_path, root, anchor)
++
++    if label_regex:
++        match = re.search(label_regex, str(json_path))
++        if match:
++            return match.group(1) if match.groups() else match.group(0)
++        # fall through to default if no match
++
++    if label_from_parts and label_from_parts > 0:
++        chosen = parent_parts[-label_from_parts:] if len(parent_parts) >= label_from_parts else parent_parts
++        if chosen:
++            return "/".join(chosen)
++
++    if parent_parts:
++        return "/".join(parent_parts)
++
++    # JSON file sits directly in root (or directly in anchor/) with no
++    # parent folder left to name it after
++    return json_path.stem
++
++
++def find_metrics_files(root: Path, pattern: str):
++    return sorted(root.rglob(pattern))
++
++
++def load_metrics(json_path: Path):
++    try:
++        with open(json_path, "r") as f:
++            return json.load(f)
++    except (json.JSONDecodeError, OSError) as e:
++        print(f"[WARN] Could not read {json_path}: {e}", file=sys.stderr)
++        return None
++
++
++def build_rows(root: Path, pattern: str, datasets, per_dataset: bool, label_from_parts: int, label_regex: str, anchor: str):
++    files = find_metrics_files(root, pattern)
++    if not files:
++        return [], []
++
++    rows = []
++    used_labels = []
++
++    for fpath in files:
++        data = load_metrics(fpath)
++        if data is None:
++            continue
++
++        label = make_label(fpath, root, label_from_parts, label_regex, anchor)
++        used_labels.append((label, fpath))
++
++        present_datasets = datasets if datasets else sorted(data.keys())
++        available = [d for d in present_datasets if d in data and isinstance(data[d], dict)]
++        missing = [d for d in present_datasets if d not in data]
++        if datasets and missing:
++            print(f"[WARN] {label} ({fpath}): missing datasets {missing}", file=sys.stderr)
++
++        if not available:
++            print(f"[WARN] {label} ({fpath}): no usable dataset entries found, skipping", file=sys.stderr)
++            continue
++
++        if per_dataset:
++            for ds in available:
++                metrics = data[ds]
++                row = {"run": label, "dataset": ds, "source_file": str(fpath)}
++                for m in METRIC_COLS:
++                    row[m] = metrics.get(m, float("nan"))
++                rows.append(row)
++        else:
++            row = {"run": label, "n_datasets": len(available), "source_file": str(fpath)}
++            for m in METRIC_COLS:
++                vals = [data[ds].get(m) for ds in available if data[ds].get(m) is not None]
++                row[m] = sum(vals) / len(vals) if vals else float("nan")
++            rows.append(row)
++
++    return rows, used_labels
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
++    parser.add_argument(
++        "--root",
++        type=str,
++        required=True,
++        help="Top-level directory to search recursively for metrics files",
++    )
++    parser.add_argument(
++        "--pattern",
++        type=str,
++        default="results_metrics_stage2_*.json",
++        help="Glob pattern (relative, searched recursively) to match metrics files "
++        "(default: results_metrics_stage2_*.json). Use 'results_metrics_*.json' to match any stage.",
++    )
++    parser.add_argument(
++        "--datasets",
++        nargs="+",
++        default=None,
++        help="Restrict to these dataset keys (e.g. nq hotpotqa musique 2wiki). "
++        "Default: use whatever dataset keys are present in each file.",
++    )
++    parser.add_argument(
++        "--per_dataset",
++        action="store_true",
++        help="Show one row per (run, dataset) instead of averaging across datasets",
++    )
++    parser.add_argument(
++        "--anchor",
++        type=str,
++        default="checkpoints",
++        help="Folder name to anchor labels on: the label starts right after the last "
++        "folder with this name anywhere in each file's path, e.g. with the default "
++        "'checkpoints', a file at .../checkpoints/stage2_kg/cr4/results_metrics_....json "
++        "labels as 'stage2_kg/cr4' no matter what --root points at. If this folder name "
++        "never appears in the path, falls back to the path relative to --root. "
++        "Set to '' to disable anchoring and always use the path relative to --root.",
++    )
++    parser.add_argument(
++        "--label_from_parts",
++        type=int,
++        default=0,
++        help="Cap the run label to the last N path components before the filename, "
++        "e.g. 1 -> 'cr4' instead of the full 'stage2_kg/cr4'. "
++        "Default: 0, which means use the full anchored path (recommended, "
++        "avoids collisions between e.g. stage2/cr4 and stage2_kg/cr4).",
++    )
++    parser.add_argument(
++        "--label_regex",
++        type=str,
++        default=None,
++        help="Regex applied to the full file path to extract the run label from its first "
++        "capture group, e.g. '(cr\\d+)' to pull just 'cr64' out of anywhere in the path. "
++        "Overrides both the full-path default and --label_from_parts when it matches.",
++    )
++    parser.add_argument(
++        "--percent",
++        action="store_true",
++        help="Multiply metrics by 100 for display/export (e.g. 0.4123 -> 41.23)",
++    )
++    parser.add_argument(
++        "--sort",
++        choices=["natural", "alpha", "none"],
++        default="natural",
++        help="How to sort rows by run label (default: natural, so cr4 < cr16 < cr32...)",
++    )
++    parser.add_argument(
++        "--out_csv",
++        type=str,
++        default=None,
++        help="Optional path to save the table as CSV",
++    )
++    parser.add_argument(
++        "--hide_source",
++        action="store_true",
++        help="Don't show the source_file column in the printed table (still included in CSV)",
++    )
++    args = parser.parse_args()
++
++    root = Path(args.root)
++    if not root.exists():
++        print(f"[ERROR] --root does not exist: {root}", file=sys.stderr)
++        sys.exit(1)
++
++    rows, used_labels = build_rows(
++        root,
++        args.pattern,
++        args.datasets,
++        args.per_dataset,
++        args.label_from_parts,
++        args.label_regex,
++        args.anchor,
++    )
++
++    if not rows:
++        print(
++            f"[ERROR] No metrics files matching pattern '{args.pattern}' found under {root}.\n"
++            f"        Try --pattern 'results_metrics_*.json' to widen the search, "
++            f"or check the path.",
++            file=sys.stderr,
++        )
++        sys.exit(1)
++
++    # Warn about duplicate labels (e.g. two different runs both resolving to the same
++    # label -- shouldn't normally happen with the full-path default, but can still occur
++    # with --label_from_parts or --label_regex set to something too short)
++    label_counts = {}
++    for label, fpath in used_labels:
++        label_counts.setdefault(label, []).append(fpath)
++    dupes = {l: paths for l, paths in label_counts.items() if len(paths) > 1}
++    if dupes:
++        print("[WARN] Multiple files resolved to the same run label — consider dropping "
++              "--label_from_parts / --label_regex to use the full path instead:", file=sys.stderr)
++        for label, paths in dupes.items():
++            print(f"    '{label}':", file=sys.stderr)
++            for p in paths:
++                print(f"        {p}", file=sys.stderr)
++
++    df = pd.DataFrame(rows)
++
++    if args.percent:
++        for m in METRIC_COLS:
++            if m in df.columns:
++                df[m] = df[m] * 100
++
++    # Sort (done with plain Python sorted() + reindex rather than df.sort_values,
++    # since natural-sort keys are heterogeneous tuples that pandas' lexsort can't compare)
++    if args.sort in ("natural", "alpha"):
++        if args.sort == "natural":
++            key_fn = lambda i: (natural_sort_key(df.at[i, "run"]), df.at[i, "dataset"] if args.per_dataset else "")
++        else:
++            key_fn = lambda i: (df.at[i, "run"], df.at[i, "dataset"] if args.per_dataset else "")
++        new_order = sorted(df.index, key=key_fn)
++        df = df.loc[new_order]
++    df = df.reset_index(drop=True)
++
++    # Column order
++    id_cols = ["run"] + (["dataset"] if args.per_dataset else ["n_datasets"])
++    metric_cols_present = [m for m in METRIC_COLS if m in df.columns]
++    df = df[id_cols + metric_cols_present + ["source_file"]]
++
++    display_df = df.drop(columns=["source_file"]) if args.hide_source else df
++    for m in metric_cols_present:
++        display_df[m] = display_df[m].round(4 if not args.percent else 2)
++
++    mode_desc = "per-dataset" if args.per_dataset else "averaged across datasets"
++    print(f"\nFound {len(used_labels)} metrics file(s) under {root}\nMode: {mode_desc}\n")
++    try:
++        print(display_df.to_string(index=False))
++    except Exception:
++        print(display_df)
++
++    if args.out_csv:
++        out_path = Path(args.out_csv)
++        out_path.parent.mkdir(parents=True, exist_ok=True)
++        df.to_csv(out_path, index=False)
++        print(f"\nSaved CSV to: {out_path}")
++
++
++if __name__ == "__main__":
++    main()
+\ No newline at end of file
+diff --git a/scripts/check_kg_results.py b/scripts/check_kg_results.py
+new file mode 100644
+index 0000000..1b06cef
+--- /dev/null
++++ b/scripts/check_kg_results.py
+@@ -0,0 +1,97 @@
++#!/usr/bin/env python3
++"""
++Run this directly inside checkpoints/stage2_kg_sweep/ to summarize all variant results.
++
++Usage:
++    cd /vol/biomedic3/vd425/clara-main/checkpoints/stage2_kg_sweep
++    python3 check_results.py
++    python3 check_results.py --metric recall@1
++    python3 check_results.py --vanilla /vol/biomedic3/vd425/clara-main/checkpoints/stage2/cr4
++    python3 check_results.py --kg-baseline /vol/biomedic3/vd425/clara-main/checkpoints/stage2_kg/cr4
++"""
++
++import json
++import os
++import re
++import argparse
++
++DATASETS = ["nq", "hotpotqa", "musique", "2wiki"]
++DEFAULT_METRICS = ["f1", "em", "recall@1", "recall@3", "recall@5"]
++
++
++def find_results_file(ckpt_dir):
++    if not os.path.isdir(ckpt_dir):
++        return None
++    candidates = [f for f in os.listdir(ckpt_dir) if f.startswith("results_metrics_") and f.endswith(".json")]
++    if not candidates:
++        return None
++    preferred = [c for c in candidates if "stage2_False_5" in c]
++    chosen = preferred[0] if preferred else candidates[0]
++    return os.path.join(ckpt_dir, chosen)
++
++
++def load_metrics(path):
++    if not path or not os.path.exists(path):
++        return None
++    try:
++        with open(path) as f:
++            return json.load(f)
++    except (json.JSONDecodeError, OSError):
++        return None
++
++
++def format_cell(data, ds, metrics):
++    if data is None or ds not in data:
++        return "N/A"
++    parts = []
++    for m in metrics:
++        val = data[ds].get(m)
++        parts.append(f"{m}={val:.3f}" if val is not None else f"{m}=?")
++    return " ".join(parts)
++
++
++def sort_key(name):
++    """Sort sweep variant names numerically by hops then damping, not alphabetically."""
++    m = re.match(r"hops(\d+)_damp([\d.]+)", name)
++    if m:
++        return (int(m.group(1)), float(m.group(2)))
++    return (999, 999.0)
++
++
++def main():
++    parser = argparse.ArgumentParser()
++    parser.add_argument("--metric", default=None, help="Show only this metric (e.g. recall@1). Default: f1, em, recall@1.")
++    parser.add_argument("--vanilla", default="/vol/biomedic3/vd425/clara-main/checkpoints/stage2/cr4")
++    parser.add_argument("--kg-baseline", default="/vol/biomedic3/vd425/clara-main/checkpoints/stage2_kg/cr4")
++    args = parser.parse_args()
++
++    metrics = [args.metric] if args.metric else DEFAULT_METRICS
++
++    runs = {}
++    runs["vanilla (no KG)"] = args.vanilla
++    runs["KG baseline (hops=2 damp=0.5, full eval)"] = args.kg_baseline
++
++    cwd = os.getcwd()
++    variant_names = sorted(
++        [d for d in os.listdir(cwd) if os.path.isdir(d) and re.match(r"hops\d+_damp[\d.]+", d)],
++        key=sort_key
++    )
++    for v in variant_names:
++        runs[f"sweep {v}"] = os.path.join(cwd, v)
++
++    col_width = 13 + 8 * len(metrics)
++    header = f"{'Run':<40}" + "".join(f"{ds:<{col_width}}" for ds in DATASETS)
++    print(header)
++    print("-" * len(header))
++
++    for run_name, ckpt_dir in runs.items():
++        f = find_results_file(ckpt_dir)
++        data = load_metrics(f)
++        row = f"{run_name:<40}"
++        for ds in DATASETS:
++            row += f"{format_cell(data, ds, metrics):<{col_width}}"
++        print(row)
++
++
++if __name__ == "__main__":
++    main()
+\ No newline at end of file
+diff --git a/scripts/eval_e2e_kg_array.sh b/scripts/eval_e2e_kg_array.sh
+new file mode 100644
+index 0000000..1a28119
+--- /dev/null
++++ b/scripts/eval_e2e_kg_array.sh
+@@ -0,0 +1,66 @@
++#!/bin/bash
++#SBATCH --partition=gpus48
++#SBATCH --gres=gpu:4
++#SBATCH --output=/vol/biomedic3/vd425/clara-main/logs/eval_stage2_cr%a_kg_%j.log
++#SBATCH --time=23:59:59
++#SBATCH --job-name=eval_stage2_kg
++#SBATCH --array=16
++
++set -ex
++
++source /vol/cuda/12.9.0/setup.sh
++export CUDA_HOME=/vol/cuda/12.9.0
++export PATH=$CUDA_HOME/bin:$PATH
++export NCCL_P2P_DISABLE=1
++export NCCL_IB_DISABLE=1
++export HF_HOME=/vol/biomedic3/vd425/.cache/huggingface
++export HF_DATASETS_CACHE=/vol/biomedic3/vd425/.cache/huggingface/datasets
++export HF_HUB_OFFLINE=1
++export TRITON_CACHE_DIR=/vol/biomedic3/vd425/.cache/triton
++export TORCH_EXTENSIONS_DIR=/vol/biomedic3/vd425/.cache/torch_extensions
++export TMPDIR=/vol/biomedic3/vd425/.tmp
++export MPLCONFIGDIR=/vol/biomedic3/vd425/.cache/matplotlib
++export PYTHONUNBUFFERED=1
++mkdir -p $HF_HOME $HF_DATASETS_CACHE $TRITON_CACHE_DIR $TORCH_EXTENSIONS_DIR $TMPDIR $MPLCONFIGDIR
++
++source /vol/biomedic3/vd425/clara-main/ml-clara/.venv/bin/activate
++
++CR=${SLURM_ARRAY_TASK_ID}
++BASE_DIR=/vol/biomedic3/vd425/clara-main
++CKPT_PATH=$BASE_DIR/checkpoints/stage2_kg/cr${CR}
++
++unset PYTHONPATH
++export PYTHONPATH=$BASE_DIR/ml-clara:$CKPT_PATH
++
++# One-line pre-flight check, cheap and fast (no GPU touched), confirming
++# use_kg_retrieval actually made it into this checkpoint's config.json
++# before spending a 4-GPU allocation on it.
++python -c "
++import json
++cfg = json.load(open('$CKPT_PATH/config.json'))
++assert cfg.get('use_kg_retrieval') is True, f'use_kg_retrieval={cfg.get(\"use_kg_retrieval\")} -- aborting'
++assert cfg.get('stage2_retrieval_top_n') == 100, f'stage2_retrieval_top_n={cfg.get(\"stage2_retrieval_top_n\")} (expected 100) -- aborting'
++print('OK: KG config confirmed, stage2_retrieval_top_n=%s kg_rank=%s kg_hops=%s kg_damping=%s' % (
++    cfg.get('stage2_retrieval_top_n'), cfg.get('kg_rank'), cfg.get('kg_hops'), cfg.get('kg_damping')))
++"
++
++# Unique port per array task to avoid collisions if jobs land on the same node
++MASTER_PORT=$((29500 + CR))
++
++accelerate launch \
++    --num_processes=4 \
++    --num_machines=1 \
++    --mixed_precision=bf16 \
++    --main_process_port=${MASTER_PORT} \
++    $BASE_DIR/ml-clara/evaluation/evaluate.py \
++        --model_path  "$CKPT_PATH" \
++        --stage       stage2 \
++        --dataset     nq,hotpotqa,musique,2wiki \
++        --generation_top_k 5 \
++        --batch_size  4 \
++        ${MAX_SAMPLES:+--max_samples $MAX_SAMPLES}
++
++echo ""
++echo "========================================"
++echo "Done — CR=${CR}x.  Results in $CKPT_PATH/"
++echo "========================================"
+\ No newline at end of file
+diff --git a/scripts/stage2_kg_array.sh b/scripts/stage2_kg_array.sh
+new file mode 100644
+index 0000000..69eb87b
+--- /dev/null
++++ b/scripts/stage2_kg_array.sh
+@@ -0,0 +1,164 @@
++#!/bin/bash
++#SBATCH --partition=gpus48
++#SBATCH --gres=gpu:4
++#SBATCH --output=/vol/biomedic3/vd425/clara-main/logs/stage2_cr%a_kg_%j.log
++#SBATCH --time=4-11:59:00
++#SBATCH --job-name=clara_stage2_kg
++#SBATCH --array=16,32,64,128,256
++
++set -ex
++
++# ─────────────────────────────────────────
++# Environment
++# ─────────────────────────────────────────
++source /vol/cuda/12.9.0/setup.sh
++
++export CUDA_HOME=/vol/cuda/12.9.0
++export UV_CACHE_DIR=/vol/biomedic3/vd425/.cache/uv
++export PATH=$CUDA_HOME/bin:$PATH
++export NCCL_DEBUG=INFO
++export NCCL_P2P_DISABLE=1
++export NCCL_IB_DISABLE=1
++export HF_HOME=/vol/biomedic3/vd425/.cache/huggingface
++export HF_DATASETS_CACHE=/vol/biomedic3/vd425/.cache/huggingface/datasets
++export TRITON_CACHE_DIR=/vol/biomedic3/vd425/.cache/triton
++export TORCH_EXTENSIONS_DIR=/vol/biomedic3/vd425/.cache/torch_extensions
++export TMPDIR=/vol/biomedic3/vd425/.tmp
++export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
++mkdir -p $HF_HOME $HF_DATASETS_CACHE $TRITON_CACHE_DIR $TORCH_EXTENSIONS_DIR $TMPDIR
++
++source /vol/biomedic3/vd425/clara-main/ml-clara/.venv/bin/activate
++export PYTHONPATH=/vol/biomedic3/vd425/clara-main/ml-clara:$PYTHONPATH
++
++nvcc --version
++python -c "import torch; print('torch:', torch.__version__, '| cuda:', torch.version.cuda)"
++
++# Fail fast if the new module isn't where it needs to be, rather than 40 minutes
++# into model loading on 4 GPUs.
++python -c "from openrlhf.models.temporal_link_matrix import TemporalLinkMatrix, multi_hop_propagate" \
++    || { echo "ERROR: openrlhf/models/temporal_link_matrix.py not found/importable. Aborting."; exit 1; }
++
++# ─────────────────────────────────────────
++# Config — CR comes from the array task ID
++# ─────────────────────────────────────────
++CR=${SLURM_ARRAY_TASK_ID}
++NUM_GPUS=${SLURM_GPUS_ON_NODE:-4}
++BASE_DIR=/vol/biomedic3/vd425/clara-main
++
++MODEL_PATH=$BASE_DIR/models/Mistral-7B-Instruct-v0.2
++PRETRAIN_CHECKPOINT=$BASE_DIR/checkpoints/stage1_2/cr${CR}
++
++# Same data as the baseline run -- identical pool, identical positives-guaranteed
++# setup, so the ONLY difference between this run and stage2_e2e_cr4.sh is the
++# KG flags and the widened candidate pool below. That's what makes the two
++# runs a valid A/B comparison.
++DATA_PATH="$BASE_DIR/data/e2e_training_ours_*_with_pos/train-*.parquet"
++
++SAVE_PATH=$BASE_DIR/checkpoints/stage2_kg/cr${CR}
++mkdir -p $SAVE_PATH $BASE_DIR/logs
++
++echo "Using ${NUM_GPUS} GPUs — CR=${CR}"
++echo "Pretrain checkpoint: ${PRETRAIN_CHECKPOINT}  (stage1_2 -- link_module has no prior"
++echo "  weights here and will train from a fresh random init during this run, same as"
++echo "  query_reasoner_adapter does on any first stage2 run)"
++echo "Train data: ${DATA_PATH}"
++
++# ─────────────────────────────────────────
++# Training command
++# ─────────────────────────────────────────
++# Differences from the non-KG baseline (stage2_e2e_cr4.sh), and why:
++#
++#   --stage2_retrieval_top_n 100   Widened candidate pool. The KG module needs a
++#                                  real graph to link across; at the baseline's
++#                                  implicit top_n (== generation_top_k == 5) there
++#                                  are only 5 candidates and almost nothing to hop
++#                                  between. 100 matches the paper's worked example.
++#   --generation_top_k 5           UNCHANGED from baseline, deliberately. This is
++#                                  NOT a free knob -- the training data
++#                                  (e2e_training_ours_*_with_pos) was built with a
++#                                  FIXED 5 documents per example, and the collate
++#                                  function's decoder prompt construction bakes in
++#                                  exactly that many <MEM> token blocks per example
++#                                  at data-loading time, independent of any KG
++#                                  changes. Raising this without matching training
++#                                  data causes a slot-count mismatch between the
++#                                  prompt's <MEM> blocks and the number of document
++#                                  embeddings the model tries to write into them.
++#                                  The KG module widens the CANDIDATE POOL it scores
++#                                  over (stage2_retrieval_top_n), not the final
++#                                  selection count fed to the generator -- those are
++#                                  separate knobs; only the former is safe to widen
++#                                  here.
++#   --use_kg_retrieval              Turns on the link module in _forward_stage2_batch.
++#   --kg_rank 64 / --kg_hops 2 / --kg_damping 0.5   Defaults from the write-up
++#                                  (E=512, r=64 worked example; hops=2 matches
++#                                  HotpotQA/2WikiMultiHopQA's typical hop count).
++#
++# Everything else (data, epochs, LR, batch sizes, precision, checkpointing
++# cadence) is left IDENTICAL to the baseline script on purpose.
++training_commands=(
++    openrlhf.cli.train_sft
++    --pretrain "$MODEL_PATH"
++    --pretrain_checkpoint "$PRETRAIN_CHECKPOINT"
++    --stage stage2
++    --compress_rate "$CR"
++    --doc_max_length 256
++    --dataset "$DATA_PATH"
++    --max_len 1024
++    --train_batch_size 32
++    --micro_train_batch_size 1
++    --save_path "$SAVE_PATH"
++    --ckpt_path "$SAVE_PATH/checkpoints"
++    --save_steps -2
++    --save_hf_ckpt
++    --logging_steps 1
++    --eval_steps 100
++    --zero_stage 2
++    --max_epochs 1
++    --bf16
++    --flash_attn
++    --learning_rate 5e-6
++    --lr_scheduler constant
++    --gradient_checkpointing
++    --stage2_retrieval_top_n 100
++    --generation_top_k 5
++    --use_kg_retrieval
++    --kg_rank 64
++    --kg_hops 2
++    --kg_damping 0.5
++    --qa_loss
++    --do_eval_gen
++)
++
++# ─────────────────────────────────────────
++# Launch
++# ─────────────────────────────────────────
++# Use a unique port per array task to avoid collisions if jobs land on the same node
++MASTER_PORT=$((29504 + CR))
++
++DISTRIBUTED_ARGS="--nproc_per_node ${NUM_GPUS} \
++    --nnodes 1 \
++    --rdzv_id ${CR} \
++    --rdzv_backend c10d \
++    --rdzv_endpoint 127.0.0.1:${MASTER_PORT} \
++    --master_addr 127.0.0.1 \
++    --master_port ${MASTER_PORT} \
++    --node_rank 0"
++
++nvidia-smi
++echo "Starting Stage 2 (end-to-end, KG-augmented) training — compression rate ${CR}x on ${NUM_GPUS} GPUs"
++torchrun $DISTRIBUTED_ARGS -m "${training_commands[@]}"
++
++# Sanity check: confirm the link module actually got saved, not just the usual files.
++if [ -f "$SAVE_PATH/link_module.pth" ]; then
++    echo "OK: link_module.pth found in $SAVE_PATH"
++else
++    echo "WARNING: link_module.pth NOT found in $SAVE_PATH -- KG weights were not persisted."
++fi
++
++# Copy model definition (and the new module) alongside checkpoint, matching
++# the baseline script's existing convention.
++cp $BASE_DIR/ml-clara/openrlhf/models/modeling_clara.py $SAVE_PATH
++cp $BASE_DIR/ml-clara/openrlhf/models/temporal_link_matrix.py $SAVE_PATH
++
++echo "Done — CR=${CR}!"
+\ No newline at end of file
+diff --git a/scripts/summarize_kg_sweep.py b/scripts/summarize_kg_sweep.py
+new file mode 100644
+index 0000000..f17a22e
+--- /dev/null
++++ b/scripts/summarize_kg_sweep.py
+@@ -0,0 +1,212 @@
++#!/usr/bin/env python3
++"""
++summarize_kg_sweep.py
++
++Walks a stage2 KG sweep directory (e.g. checkpoints/stage2_kg_sweep), finds each
++hopsX_dampY subfolder's results_metrics_*.json file, and prints a comparison
++table of f1 / em (and optionally recall@k / precision@k) per dataset per config.
++
++Usage:
++    python summarize_kg_sweep.py [sweep_dir] [--metrics-file NAME] [--full] [--sort-by KEY] [--csv OUT.csv]
++
++Examples:
++    # Run from inside stage2_kg_sweep/, defaults to current dir
++    python summarize_kg_sweep.py
++
++    # Explicit path
++    python summarize_kg_sweep.py /vol/biomedic3/vd425/clara-main/checkpoints/stage2_kg_sweep
++
++    # Include recall@k / precision@k columns too
++    python summarize_kg_sweep.py --full
++
++    # Sort rows by hotpotqa f1 descending (default sorts by config name)
++    python summarize_kg_sweep.py --sort-by hotpotqa_f1
++
++    # Also dump a CSV
++    python summarize_kg_sweep.py --csv sweep_results.csv
++"""
++
++import argparse
++import csv
++import json
++import re
++import sys
++from pathlib import Path
++
++DEFAULT_METRICS_FILENAME_PATTERN = "results_metrics_stage2_False_5.json"
++
++CORE_METRICS = ["f1", "em"]
++FULL_METRICS = ["f1", "em", "acc", "recall@1", "recall@3", "recall@5",
++                "precision@1", "precision@3", "precision@5"]
++
++CONFIG_DIR_RE = re.compile(r"^hops(\d+)_damp([\d.]+)$")
++
++
++def find_config_dirs(sweep_dir: Path):
++    """Return sorted list of hopsX_dampY subdirectories."""
++    dirs = [d for d in sweep_dir.iterdir() if d.is_dir() and CONFIG_DIR_RE.match(d.name)]
++
++    def sort_key(d):
++        m = CONFIG_DIR_RE.match(d.name)
++        hops, damp = int(m.group(1)), float(m.group(2))
++        return (hops, damp)
++
++    return sorted(dirs, key=sort_key)
++
++
++def load_metrics(config_dir: Path, metrics_filename: str):
++    """Load the metrics JSON for a given config dir. Returns dict or None."""
++    metrics_path = config_dir / metrics_filename
++    if not metrics_path.exists():
++        # Fall back: look for any results_metrics_*.json in the folder
++        candidates = sorted(config_dir.glob("results_metrics_*.json"))
++        if not candidates:
++            return None, None
++        metrics_path = candidates[0]
++    try:
++        with open(metrics_path, "r") as f:
++            return json.load(f), metrics_path.name
++    except (json.JSONDecodeError, OSError) as e:
++        print(f"  [warn] failed to read {metrics_path}: {e}", file=sys.stderr)
++        return None, None
++
++
++def collect_rows(sweep_dir: Path, metrics_filename: str, full: bool):
++    """
++    Returns:
++        rows: list of dicts, one per config, with keys like 'config', 'hops',
++              'damp', and '<dataset>_<metric>' for every dataset/metric found.
++        datasets: sorted list of dataset names encountered.
++        metrics: list of metric names used (core or full).
++    """
++    config_dirs = find_config_dirs(sweep_dir)
++    if not config_dirs:
++        print(f"No hopsX_dampY folders found in {sweep_dir}", file=sys.stderr)
++        return [], [], []
++
++    metrics_wanted = FULL_METRICS if full else CORE_METRICS
++
++    rows = []
++    datasets_seen = set()
++
++    for cdir in config_dirs:
++        m = CONFIG_DIR_RE.match(cdir.name)
++        hops, damp = m.group(1), m.group(2)
++
++        data, used_filename = load_metrics(cdir, metrics_filename)
++        row = {"config": cdir.name, "hops": hops, "damp": damp}
++
++        if data is None:
++            print(f"  [warn] no metrics file found in {cdir}", file=sys.stderr)
++            rows.append(row)
++            continue
++
++        for dataset, dmetrics in data.items():
++            datasets_seen.add(dataset)
++            for metric in metrics_wanted:
++                key = f"{dataset}_{metric}"
++                val = dmetrics.get(metric)
++                row[key] = val
++
++        rows.append(row)
++
++    return rows, sorted(datasets_seen), metrics_wanted
++
++
++def format_val(v):
++    if v is None:
++        return "-"
++    if isinstance(v, float):
++        return f"{v:12f}"
++    return str(v)
++
++
++def print_table(rows, datasets, metrics):
++    if not rows:
++        return
++
++    # Build header
++    headers = ["config"]
++    for ds in datasets:
++        for m in metrics:
++            headers.append(f"{ds}_{m}")
++
++    # Compute column widths
++    col_widths = {h: len(h) for h in headers}
++    str_rows = []
++    for row in rows:
++        str_row = {"config": row["config"]}
++        for ds in datasets:
++            for m in metrics:
++                key = f"{ds}_{m}"
++                str_row[key] = format_val(row.get(key))
++        str_rows.append(str_row)
++        for h in headers:
++            col_widths[h] = max(col_widths[h], len(str_row[h]))
++
++    # Print header
++    def fmt_row(vals):
++        return "  ".join(str(v).ljust(col_widths[h]) for h, v in zip(headers, vals))
++
++    print(fmt_row(headers))
++    print("  ".join("-" * col_widths[h] for h in headers))
++    for str_row in str_rows:
++        print(fmt_row([str_row[h] for h in headers]))
++
++
++def write_csv(rows, datasets, metrics, out_path):
++    headers = ["config"]
++    for ds in datasets:
++        for m in metrics:
++            headers.append(f"{ds}_{m}")
++
++    with open(out_path, "w", newline="") as f:
++        writer = csv.DictWriter(f, fieldnames=headers, extrasaction="ignore")
++        writer.writeheader()
++        for row in rows:
++            out = {"config": row["config"]}
++            for ds in datasets:
++                for m in metrics:
++                    key = f"{ds}_{m}"
++                    out[key] = row.get(key)
++            writer.writerow(out)
++    print(f"\nCSV written to: {out_path}")
++
++
++def main():
++    parser = argparse.ArgumentParser(description="Summarize stage2 KG sweep metrics into a table.")
++    parser.add_argument("sweep_dir", nargs="?", default=".",
++                         help="Path to the sweep directory containing hopsX_dampY folders (default: current dir)")
++    parser.add_argument("--metrics-file", default=DEFAULT_METRICS_FILENAME_PATTERN,
++                         help=f"Metrics filename to look for in each config folder (default: {DEFAULT_METRICS_FILENAME_PATTERN})")
++    parser.add_argument("--full", action="store_true",
++                         help="Include recall@k / precision@k / acc columns, not just f1/em")
++    parser.add_argument("--sort-by", default=None,
++                         help="Column to sort rows by, e.g. hotpotqa_f1 (descending). Default: sort by hops then damp.")
++    parser.add_argument("--csv", default=None, help="Optional path to also write results as CSV")
++
++    args = parser.parse_args()
++    sweep_dir = Path(args.sweep_dir).resolve()
++
++    if not sweep_dir.is_dir():
++        print(f"Error: {sweep_dir} is not a directory", file=sys.stderr)
++        sys.exit(1)
++
++    rows, datasets, metrics = collect_rows(sweep_dir, args.metrics_file, args.full)
++    if not rows:
++        sys.exit(1)
++
++    if args.sort_by:
++        rows.sort(key=lambda r: (r.get(args.sort_by) is None, -(r.get(args.sort_by) or 0)))
++
++    print(f"Sweep dir: {sweep_dir}")
++    print(f"Datasets found: {', '.join(datasets)}")
++    print()
++    print_table(rows, datasets, metrics)
++
++    if args.csv:
++        write_csv(rows, datasets, metrics, args.csv)
++
++
++if __name__ == "__main__":
++    main()
+\ No newline at end of file
+diff --git a/scripts/sweep_hops_damping_12.sh b/scripts/sweep_hops_damping_12.sh
+new file mode 100644
+index 0000000..8143f6a
+--- /dev/null
++++ b/scripts/sweep_hops_damping_12.sh
+@@ -0,0 +1,92 @@
++#!/bin/bash
++#SBATCH --partition=gpus48
++#SBATCH --gres=gpu:2
++#SBATCH --output=/vol/biomedic3/vd425/clara-main/logs/sweep_%a_%j.log
++#SBATCH --time=6:00:00
++#SBATCH --job-name=kg_sweep_12
++#SBATCH --exclude=lora
++#SBATCH --array=0-11
++
++set -ex
++
++# Stagger task starts by 60s per array index to reduce the chance of two
++# tasks hitting rendezvous/GPU-init at the exact same instant when they
++# land on the same node. This is a supplement to --main_process_port and
++# the %4 throttle above, not a replacement for either.
++
++source /vol/cuda/12.9.0/setup.sh
++export CUDA_HOME=/vol/cuda/12.9.0
++export PATH=$CUDA_HOME/bin:$PATH
++export NCCL_P2P_DISABLE=1
++export NCCL_IB_DISABLE=1
++export HF_HOME=/vol/biomedic3/vd425/.cache/huggingface
++export HF_DATASETS_CACHE=/vol/biomedic3/vd425/.cache/huggingface/datasets
++export HF_HUB_OFFLINE=1
++export TRITON_CACHE_DIR=/vol/biomedic3/vd425/.cache/triton
++export TORCH_EXTENSIONS_DIR=/vol/biomedic3/vd425/.cache/torch_extensions
++export TMPDIR=/vol/biomedic3/vd425/.tmp
++export MPLCONFIGDIR=/vol/biomedic3/vd425/.cache/matplotlib
++export PYTHONUNBUFFERED=1
++mkdir -p $HF_HOME $HF_DATASETS_CACHE $TRITON_CACHE_DIR $TORCH_EXTENSIONS_DIR $TMPDIR $MPLCONFIGDIR
++
++source /vol/biomedic3/vd425/clara-main/ml-clara/.venv/bin/activate
++
++echo "SLURM_JOB_ID=$SLURM_JOB_ID SLURM_ARRAY_TASK_ID=$SLURM_ARRAY_TASK_ID host=$(hostname)"
++echo "CUDA_VISIBLE_DEVICES (as set by SLURM)=$CUDA_VISIBLE_DEVICES"
++echo "SLURM_JOB_GPUS=$SLURM_JOB_GPUS  SLURM_STEP_GPUS=$SLURM_STEP_GPUS"
++nvidia-smi --query-gpu=index,uuid,memory.used --format=csv
++if [ -n "$SLURM_JOB_GPUS" ]; then
++    export CUDA_VISIBLE_DEVICES=$SLURM_JOB_GPUS
++elif [ -n "$SLURM_STEP_GPUS" ]; then
++    export CUDA_VISIBLE_DEVICES=$SLURM_STEP_GPUS
++fi
++echo "CUDA_VISIBLE_DEVICES (final)=$CUDA_VISIBLE_DEVICES"
++
++BASE_DIR=/vol/biomedic3/vd425/clara-main
++SWEEP_ROOT=$BASE_DIR/checkpoints/stage2_kg_sweep
++
++HOPS_LIST=(2 2 2 2 2 2 1 1 3 3 4 4)
++DAMP_LIST=(0.1 0.3 0.5 0.7 0.8 0.9 0.5 0.9 0.5 0.9 0.5 0.9)
++HOPS=${HOPS_LIST[$SLURM_ARRAY_TASK_ID]}
++DAMP=${DAMP_LIST[$SLURM_ARRAY_TASK_ID]}
++
++CKPT_PATH=$SWEEP_ROOT/hops${HOPS}_damp${DAMP}
++
++unset PYTHONPATH
++export PYTHONPATH=$BASE_DIR/ml-clara:$CKPT_PATH
++
++python -c "
++import json
++cfg = json.load(open('$CKPT_PATH/config.json'))
++assert cfg.get('use_kg_retrieval') is True
++assert cfg.get('kg_hops') == $HOPS
++assert cfg.get('kg_damping') == $DAMP
++print('OK: sweep variant confirmed, hops=%s damping=%s' % (cfg.get('kg_hops'), cfg.get('kg_damping')))
++"
++
++# NUM_GPUS is derived from SLURM's own allocation (matches #SBATCH --gres=gpu:N
++# above automatically) rather than being hardcoded separately, so this can
++# never drift out of sync with the requested GPU count again.
++NUM_GPUS=${SLURM_GPUS_ON_NODE:-2}
++echo "NUM_GPUS (from SLURM_GPUS_ON_NODE, matches --gres=gpu:N)=$NUM_GPUS"
++
++# Unique rendezvous port per array task -- prevents EADDRINUSE when two tasks
++# land on the same physical node at the same time (SLURM does not guarantee
++# array tasks get separate nodes).
++PORT=$((29500 + SLURM_ARRAY_TASK_ID))
++echo "Using main_process_port=$PORT for array task $SLURM_ARRAY_TASK_ID"
++
++accelerate launch \
++    --num_processes=$NUM_GPUS \
++    --num_machines=1 \
++    --mixed_precision=bf16 \
++    --main_process_port=$PORT \
++    $BASE_DIR/ml-clara/evaluation/evaluate.py \
++        --model_path  "$CKPT_PATH" \
++        --stage       stage2 \
++        --dataset     nq,hotpotqa,musique,2wiki \
++        --generation_top_k 5 \
++        --batch_size  4 \
++        --max_samples 500
++
++echo "Done sweep variant hops=$HOPS damping=$DAMP"
+diff --git a/scripts/sweep_hops_damping_full.sh b/scripts/sweep_hops_damping_full.sh
+new file mode 100644
+index 0000000..c1993ec
+--- /dev/null
++++ b/scripts/sweep_hops_damping_full.sh
+@@ -0,0 +1,91 @@
++#!/bin/bash
++#SBATCH --partition=gpus48
++#SBATCH --gres=gpu:2
++#SBATCH --output=/vol/biomedic3/vd425/clara-main/logs/sweep_full_%a_%j.log
++#SBATCH --time=4-00:00:00
++#SBATCH --job-name=kg_sweep_full
++#SBATCH --exclude=lora
++#SBATCH --array=0-5
++
++set -ex
++
++# Stagger task starts by 60s per array index to reduce the chance of two
++# tasks hitting rendezvous/GPU-init at the exact same instant when they
++# land on the same node. This is a supplement to --main_process_port and
++# the %4 throttle above, not a replacement for either.
++
++source /vol/cuda/12.9.0/setup.sh
++export CUDA_HOME=/vol/cuda/12.9.0
++export PATH=$CUDA_HOME/bin:$PATH
++export NCCL_P2P_DISABLE=1
++export NCCL_IB_DISABLE=1
++export HF_HOME=/vol/biomedic3/vd425/.cache/huggingface
++export HF_DATASETS_CACHE=/vol/biomedic3/vd425/.cache/huggingface/datasets
++export HF_HUB_OFFLINE=1
++export TRITON_CACHE_DIR=/vol/biomedic3/vd425/.cache/triton
++export TORCH_EXTENSIONS_DIR=/vol/biomedic3/vd425/.cache/torch_extensions
++export TMPDIR=/vol/biomedic3/vd425/.tmp
++export MPLCONFIGDIR=/vol/biomedic3/vd425/.cache/matplotlib
++export PYTHONUNBUFFERED=1
++mkdir -p $HF_HOME $HF_DATASETS_CACHE $TRITON_CACHE_DIR $TORCH_EXTENSIONS_DIR $TMPDIR $MPLCONFIGDIR
++
++source /vol/biomedic3/vd425/clara-main/ml-clara/.venv/bin/activate
++
++echo "SLURM_JOB_ID=$SLURM_JOB_ID SLURM_ARRAY_TASK_ID=$SLURM_ARRAY_TASK_ID host=$(hostname)"
++echo "CUDA_VISIBLE_DEVICES (as set by SLURM)=$CUDA_VISIBLE_DEVICES"
++echo "SLURM_JOB_GPUS=$SLURM_JOB_GPUS  SLURM_STEP_GPUS=$SLURM_STEP_GPUS"
++nvidia-smi --query-gpu=index,uuid,memory.used --format=csv
++if [ -n "$SLURM_JOB_GPUS" ]; then
++    export CUDA_VISIBLE_DEVICES=$SLURM_JOB_GPUS
++elif [ -n "$SLURM_STEP_GPUS" ]; then
++    export CUDA_VISIBLE_DEVICES=$SLURM_STEP_GPUS
++fi
++echo "CUDA_VISIBLE_DEVICES (final)=$CUDA_VISIBLE_DEVICES"
++
++BASE_DIR=/vol/biomedic3/vd425/clara-main
++SWEEP_ROOT=$BASE_DIR/checkpoints/stage2_kg_sweep_full
++
++HOPS_LIST=(1 2 2 2 3 4)
++DAMP_LIST=(0.5 0.1 0.5 0.9 0.5 0.5)
++HOPS=${HOPS_LIST[$SLURM_ARRAY_TASK_ID]}
++DAMP=${DAMP_LIST[$SLURM_ARRAY_TASK_ID]}
++
++CKPT_PATH=$SWEEP_ROOT/hops${HOPS}_damp${DAMP}
++
++unset PYTHONPATH
++export PYTHONPATH=$BASE_DIR/ml-clara:$CKPT_PATH
++
++python -c "
++import json
++cfg = json.load(open('$CKPT_PATH/config.json'))
++assert cfg.get('use_kg_retrieval') is True
++assert cfg.get('kg_hops') == $HOPS
++assert cfg.get('kg_damping') == $DAMP
++print('OK: sweep variant confirmed, hops=%s damping=%s' % (cfg.get('kg_hops'), cfg.get('kg_damping')))
++"
++
++# NUM_GPUS is derived from SLURM's own allocation (matches #SBATCH --gres=gpu:N
++# above automatically) rather than being hardcoded separately, so this can
++# never drift out of sync with the requested GPU count again.
++NUM_GPUS=${SLURM_GPUS_ON_NODE:-2}
++echo "NUM_GPUS (from SLURM_GPUS_ON_NODE, matches --gres=gpu:N)=$NUM_GPUS"
++
++# Unique rendezvous port per array task -- prevents EADDRINUSE when two tasks
++# land on the same physical node at the same time (SLURM does not guarantee
++# array tasks get separate nodes).
++PORT=$((29500 + SLURM_ARRAY_TASK_ID))
++echo "Using main_process_port=$PORT for array task $SLURM_ARRAY_TASK_ID"
++
++accelerate launch \
++    --num_processes=$NUM_GPUS \
++    --num_machines=1 \
++    --mixed_precision=bf16 \
++    --main_process_port=$PORT \
++    $BASE_DIR/ml-clara/evaluation/evaluate.py \
++        --model_path  "$CKPT_PATH" \
++        --stage       stage2 \
++        --dataset     nq,hotpotqa,musique,2wiki \
++        --generation_top_k 5 \
++        --batch_size  4
++
++echo "Done sweep variant hops=$HOPS damping=$DAMP"
+\ No newline at end of file
+-- 
+2.50.1 (Apple Git-155)
+

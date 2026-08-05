@@ -1,0 +1,96 @@
+From e6d51356d3c53faac9670cef70d831b574f68056 Mon Sep 17 00:00:00 2001
+From: vovij <ap22292@qmul.ac.uk>
+Date: Wed, 29 Jul 2026 11:08:12 +0100
+Subject: [PATCH 16/17] Added max_examples flag in evaluation, fixed the
+ parameters pass in setup_model for the knowledge graph implementation and
+ added kg evalua tion script.
+
+---
+ evaluation/evaluate.py     | 7 +++++--
+ openrlhf/cli/train_sft.py  | 4 ++++
+ scripts/eval_e2e_kg_cr4.sh | 9 ++++++++-
+ scripts/stage2_cr4_kg.sh   | 2 +-
+ 4 files changed, 18 insertions(+), 4 deletions(-)
+
+diff --git a/evaluation/evaluate.py b/evaluation/evaluate.py
+index d1e60e5..e9587e9 100644
+--- a/evaluation/evaluate.py
++++ b/evaluation/evaluate.py
+@@ -453,7 +453,7 @@ class DataLoader:
+         return processed_data
+     
+     @staticmethod
+-    def load_stage2_data(dataset: str, gold_retrieval: bool) -> List[Dict]:
++    def load_stage2_data(dataset: str, gold_retrieval: bool, max_samples: int = None) -> List[Dict]:
+         """Load stage2 evaluation data."""
+         retrieval_type = "with_pos" if gold_retrieval else "no_pos"
+         file_path = f"/vol/biomedic3/vd425/clara-main/ml-clara/evaluation/evaluation_data/end_to_end_evaluation/{dataset}/eval_processed_{retrieval_type}.jsonl"
+@@ -471,6 +471,9 @@ class DataLoader:
+                 }
+                 processed_data.append(processed_item)
+         
++        if max_samples:
++            processed_data = processed_data[:max_samples]
++        
+         return processed_data
+     
+     @staticmethod
+@@ -731,7 +734,7 @@ def main():
+             if dataset == 'frames':
+                 processed_data = DataLoader.load_frames_data()
+             else:
+-                processed_data = DataLoader.load_stage2_data(dataset, args.gold_retrieval)
++                processed_data = DataLoader.load_stage2_data(dataset, args.gold_retrieval, args.max_samples)
+         elif args.stage in ['stage1_paraphrase', 'stage1_mse_visulize']:
+             if not args.paraphrase_path:
+                 raise ValueError(f"--paraphrase_path required for stage {args.stage}")
+diff --git a/openrlhf/cli/train_sft.py b/openrlhf/cli/train_sft.py
+index e403117..48d31ab 100644
+--- a/openrlhf/cli/train_sft.py
++++ b/openrlhf/cli/train_sft.py
+@@ -71,6 +71,10 @@ def setup_model(args: argparse.Namespace) -> CLaRa:
+             doc_max_length=args.doc_max_length,
+             compress_rate=args.compress_rate,
+             use_kg_retrieval=args.use_kg_retrieval,
++            stage2_retrieval_top_n=args.stage2_retrieval_top_n,
++            kg_rank=args.kg_rank,
++            kg_hops=args.kg_hops,
++            kg_damping=args.kg_damping,
+         )
+     else:
+         print("Initializing new model")
+diff --git a/scripts/eval_e2e_kg_cr4.sh b/scripts/eval_e2e_kg_cr4.sh
+index 707d2cd..b77c43f 100644
+--- a/scripts/eval_e2e_kg_cr4.sh
++++ b/scripts/eval_e2e_kg_cr4.sh
+@@ -33,7 +33,14 @@ export PYTHONPATH=$BASE_DIR/ml-clara:$CKPT_PATH
+ # One-line pre-flight check, cheap and fast (no GPU touched), confirming
+ # use_kg_retrieval actually made it into this checkpoint's config.json
+ # before spending a 4-GPU allocation on it.
+-python -c "import json; cfg = json.load(open('$CKPT_PATH/config.json')); assert cfg.get('use_kg_retrieval') is True, f'use_kg_retrieval={cfg.get(\"use_kg_retrieval\")} -- aborting'; print('OK: KG config confirmed, kg_rank=%s kg_hops=%s kg_damping=%s' % (cfg.get('kg_rank'), cfg.get('kg_hops'), cfg.get('kg_damping')))"
++python -c "
++import json
++cfg = json.load(open('$CKPT_PATH/config.json'))
++assert cfg.get('use_kg_retrieval') is True, f'use_kg_retrieval={cfg.get(\"use_kg_retrieval\")} -- aborting'
++assert cfg.get('stage2_retrieval_top_n') == 100, f'stage2_retrieval_top_n={cfg.get(\"stage2_retrieval_top_n\")} (expected 100) -- aborting'
++print('OK: KG config confirmed, stage2_retrieval_top_n=%s kg_rank=%s kg_hops=%s kg_damping=%s' % (
++    cfg.get('stage2_retrieval_top_n'), cfg.get('kg_rank'), cfg.get('kg_hops'), cfg.get('kg_damping')))
++"
+ 
+ accelerate launch \
+     --num_processes=4 \
+diff --git a/scripts/stage2_cr4_kg.sh b/scripts/stage2_cr4_kg.sh
+index fcb7bf6..6b35d86 100644
+--- a/scripts/stage2_cr4_kg.sh
++++ b/scripts/stage2_cr4_kg.sh
+@@ -1,6 +1,6 @@
+ #!/bin/bash
+ #SBATCH --partition=gpus48
+-#SBATCH --gres=gpu:4
++#SBATCH --gres=gpu:8
+ #SBATCH --output=/vol/biomedic3/vd425/clara-main/logs/stage2_cr4_kg_%j.log
+ #SBATCH --time=4-11:59:00
+ #SBATCH --job-name=clara_stage2_cr4_kg
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,0 +1,103 @@
+From 9c8129d4ee514f192f18567be7167946de2fe4e2 Mon Sep 17 00:00:00 2001
+From: vovij <ap22292@qmul.ac.uk>
+Date: Thu, 7 May 2026 15:21:23 +0100
+Subject: [PATCH 01/17] Initial commit including CLaRa structure and FRAMES
+ dataset scraper.
+
+---
+ .DS_Store                  | Bin 6148 -> 6148 bytes
+ .gitignore                 |  34 ++++++++++++++++++++++++++++++++++
+ scripts/download_models.sh |  18 ++++++++++++++++++
+ 3 files changed, 52 insertions(+)
+ create mode 100644 .gitignore
+ create mode 100644 scripts/download_models.sh
+
+diff --git a/.DS_Store b/.DS_Store
+index a66af0310a509adaa8b6ae389d81db9b160ae944..d00904d89844b2f4dbe03757e622ccc3c4734b63 100644
+GIT binary patch
+delta 132
+zcmZoMXfc=|#>B`mF;Q%yo+2aL#DLw5Y?FCdsx8?VavAa&QW#Phau|wp^HW@sa`KZH
+z7#KM0URDL|zIxmd$VO39kYN~{oS$2;S&&1FWn+OM(`I%Keh#47K!NYflles~1%O%@
+Q7#SFtpft<o2$40+0LR@PkpKVy
+
+literal 6148
+zcmeHKzfTlF6#j-g!{snaX@bQjG&Y#fP*|;GZ7ezefD`Tqggf@a4`XApm6iX3e}IXh
+z;9sz?ptJ%j6DXm=LK6+&n;Dk3w|f{GW6Zo{=G%Mk&Ae~F-JQ7sV3zkfi@+>^2Ag2L
+z$*#gAF0Eu!-t&-XWR5|9v9*>CN2Sc*2nqxR{zV1k+pXg<`q;p({(kTE4nOMHFin!x
+zLApv`<L8r$&F`N+KP|>PH^xWn*K5Q5rmQ!t+d+yo?C83{!jg{Zx^E5-lDw`TJ4~<Z
+zR>gH)pe=Qq=;9S#Vt_sNyS(!hTbje%+3C@wJk96bmz+=KoSNI8ay8Gn^H_LJljmzP
+z9AZSSUCq$U$3My$n%ndD$5&d7&7)aO&eD9$e4EAiyn58CKlZ$4PWE+7b9nnZ=a7%p
+z)vMyVF78TMZayg$=wb`o)L|VxtpsY{UR3319=}>&ue2!5rTN^HSKxIg5?<5T;oG}S
+zO-6i+if{4M`ARuMb9(e4=QK8tW;8jgz^4`qpW7PuY_Z0S!_Wr>f&xK-Tme}hA~wO;
+zW9HB<9qjB8fLN#78n5l%PK?Asj6G%!>7f}nl<0;Uf5b3uIQ@~&i#=uz-EbINne+I{
+z#-C7(txkVr(_vzVp$`fK1&RvP+|OCr|DW+2o^bvz4hp}50zrZQN&!<(TFEkR$?vVD
+xo0GjZVr#RBNnYmA4q@lFV|yW6@dGw%j74%mj6G%!>7j)`0#=651qJ@90+%9_0jB@}
+
+diff --git a/.gitignore b/.gitignore
+new file mode 100644
+index 0000000..0980e88
+--- /dev/null
++++ b/.gitignore
+@@ -0,0 +1,34 @@
++# Model weights
++*.bin
++*.safetensors
++*.pth
++*.pt
++
++# Model index files
++*.index.json
++
++# Checkpoints
++checkpoints/
++
++# Base models
++models/
++
++# Logs
++logs/
++*.log
++
++# Conda
++miniconda3/
++
++# Python
++__pycache__/
++*.pyc
++*.pyo
++.env
++
++# Jupyter
++.ipynb_checkpoints/
++
++# OS
++.DS_Store
++EOF
+\ No newline at end of file
+diff --git a/scripts/download_models.sh b/scripts/download_models.sh
+new file mode 100644
+index 0000000..0238c53
+--- /dev/null
++++ b/scripts/download_models.sh
+@@ -0,0 +1,18 @@
++#!/bin/bash
++#SBATCH --partition=gpus
++#SBATCH --gres=gpu:1
++#SBATCH --output=/vol/biomedic3/vd425/logs/download_%j.log
++#SBATCH --time=0-04:00:00
++#SBATCH --job-name=hf_download
++
++export HF_TOKEN=$(cat /vol/biomedic3/vd425/.hf_token)
++
++source /vol/biomedic3/vd425/miniconda3/bin/activate clara
++
++hf download mistralai/Mistral-7B-Instruct-v0.2 \
++    --local-dir /vol/biomedic3/vd425/models/Mistral-7B-Instruct-v0.2
++
++hf download apple/CLaRa-7B-E2E \
++    --local-dir /vol/biomedic3/vd425/checkpoints/CLaRa-7B-E2E
++
++echo "All downloads complete!"
+-- 
+2.50.1 (Apple Git-155)
+

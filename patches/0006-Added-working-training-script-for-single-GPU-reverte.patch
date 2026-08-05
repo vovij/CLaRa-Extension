@@ -1,0 +1,93 @@
+From 8d19b1918c24ea17ec1ef5c32a2acd0a4f08fe62 Mon Sep 17 00:00:00 2001
+From: vovij <ap22292@qmul.ac.uk>
+Date: Fri, 5 Jun 2026 16:17:30 +0100
+Subject: [PATCH 06/17] Added working training script for single GPU, reverted
+ to initial train_sft.py.
+
+---
+ .DS_Store                                   | Bin 8196 -> 8196 bytes
+ openrlhf/cli/train_sft.py                   |   8 +++-----
+ scripts/requirements_patch.sh               |   5 +++++
+ scripts/{test.sh => training_single_gpu.sh} |   2 --
+ 4 files changed, 8 insertions(+), 7 deletions(-)
+ create mode 100644 scripts/requirements_patch.sh
+ rename scripts/{test.sh => training_single_gpu.sh} (97%)
+
+diff --git a/.DS_Store b/.DS_Store
+index 800392468ab9d12cd001c1ae84e013d4c23f3787..a04c89dcbbc2d0997b882e478588f8e541f82ed1 100644
+GIT binary patch
+delta 102
+zcmZp1XmQwJFUlx8*+Fy)lf%Ku*F@#m#LaE5^uL^}ASN=IPmBk_Rbrg5G4TlFW_Ae+
+KRuXg^WCQ@MZXsm=
+
+delta 102
+zcmZp1XmQwJFUqJf*+Fy)lYQpoYoc;&CTrGY+<h@wK}=*apBN8<tHju_G4TlFW_Ae+
+KRuXg^WCQ>z$s{oV
+
+diff --git a/openrlhf/cli/train_sft.py b/openrlhf/cli/train_sft.py
+index 0f026f3..d263bbe 100644
+--- a/openrlhf/cli/train_sft.py
++++ b/openrlhf/cli/train_sft.py
+@@ -140,7 +140,6 @@ def setup_datasets(args: argparse.Namespace, tokenizer, strategy, model: CLaRa):
+ 
+ def setup_training_components(args: argparse.Namespace, model: CLaRa, train_dataset, strategy):
+     """Setup optimizer, scheduler and other training components."""
+-    # Configure optimizer
+     optimizer = strategy.create_optimizer(
+         model, 
+         lr=args.learning_rate, 
+@@ -148,13 +147,9 @@ def setup_training_components(args: argparse.Namespace, model: CLaRa, train_data
+         weight_decay=args.l2
+     )
+ 
+-    # Configure scheduler
+     num_update_steps_per_epoch = len(train_dataset) // args.train_batch_size
+     max_steps = math.ceil(args.max_epochs * num_update_steps_per_epoch)
+ 
+-    # Prepare models with strategy
+-    model, optimizer, scheduler = strategy.prepare((model, optimizer, scheduler))
+-
+     scheduler = get_scheduler(
+         args.lr_scheduler,
+         optimizer,
+@@ -162,6 +157,9 @@ def setup_training_components(args: argparse.Namespace, model: CLaRa, train_data
+         num_training_steps=max_steps,
+         scheduler_specific_kwargs={"min_lr": args.learning_rate * 0.1},
+     )
++
++    # Prepare with strategy — scheduler passed in so DeepSpeed manages it
++    model, optimizer, scheduler = strategy.prepare((model, optimizer, scheduler))
+     
+     return model, optimizer, scheduler, num_update_steps_per_epoch
+ 
+diff --git a/scripts/requirements_patch.sh b/scripts/requirements_patch.sh
+new file mode 100644
+index 0000000..cf35923
+--- /dev/null
++++ b/scripts/requirements_patch.sh
+@@ -0,0 +1,5 @@
++# requirements_patch.sh — run once after pip install
++# Fixes: zip(strict=True) incompatibility between PyTorch 2.11 and DeepSpeed 0.18.1
++TORCH_SCHED=$(python -c "import torch.optim.lr_scheduler as s; import inspect; print(inspect.getfile(s))")
++sed -i 's/zip(self.optimizer.param_groups, values, strict=True)/zip(self.optimizer.param_groups, values)/' $TORCH_SCHED
++echo "Patch applied to $TORCH_SCHED"
+\ No newline at end of file
+diff --git a/scripts/test.sh b/scripts/training_single_gpu.sh
+similarity index 97%
+rename from scripts/test.sh
+rename to scripts/training_single_gpu.sh
+index 9342d6b..b78c1ed 100644
+--- a/scripts/test.sh
++++ b/scripts/training_single_gpu.sh
+@@ -55,8 +55,6 @@ training_commands="/vol/biomedic3/vd425/clara-main/ml-clara/openrlhf/cli/train_s
+     --max_epochs 1 \
+     --bf16 \
+     --learning_rate 1e-4 \
+-    --lr_scheduler constant \
+-    --lr_warmup_ratio 0.0 \
+     --gradient_checkpointing \
+     --generation_top_k 1 \
+     --qa_loss \
+-- 
+2.50.1 (Apple Git-155)
+

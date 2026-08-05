@@ -1,0 +1,705 @@
+From 7de9f1649f98750514cfb5ea5443719e9e99724d Mon Sep 17 00:00:00 2001
+From: vovij <ap22292@qmul.ac.uk>
+Date: Sat, 25 Jul 2026 18:26:45 +0100
+Subject: [PATCH 15/17] Implemented knowledge graph module into CLaRa
+ architecture.
+
+---
+ .DS_Store                         | Bin 8196 -> 8196 bytes
+ openrlhf/cli/train_sft.py         |  16 ++-
+ openrlhf/models/modeling_clara.py |  55 ++++++++
+ scripts/eval_e2e_kg_cr4.sh        |  48 +++++++
+ scripts/stage2_cr4_kg.sh          | 160 ++++++++++++++++++++++
+ scripts/temporal_link_matrix.py   | 219 +++++++++++++++++++++---------
+ 6 files changed, 436 insertions(+), 62 deletions(-)
+ create mode 100644 scripts/eval_e2e_kg_cr4.sh
+ create mode 100644 scripts/stage2_cr4_kg.sh
+
+diff --git a/.DS_Store b/.DS_Store
+index d8af842fcbd7020496918db35d972caae3b6a808..a06b8deea171c8fb7fb1495f011bb323276846b4 100644
+GIT binary patch
+delta 114
+zcmZp1XmQwJC(0CZeX@gS5#xr*n?=7dGjUFyyhcopEhA`c^c1ei7sM10Op(c4;(Uw`
+QHcN`DvXQK7vZVNH0R4(5tN;K2
+
+delta 114
+zcmZp1XmQwJC(0zVbFzbI5o5vR&7$9!883XCyhcopZ30(aiwpbY3t|cgrpRP2aX!Wc
+Qn<d3n*+|wkSyKEp0LtPfWB>pF
+
+diff --git a/openrlhf/cli/train_sft.py b/openrlhf/cli/train_sft.py
+index 4db39de..e403117 100644
+--- a/openrlhf/cli/train_sft.py
++++ b/openrlhf/cli/train_sft.py
+@@ -50,6 +50,10 @@ def create_clara_config(args: argparse.Namespace) -> CLaRaConfig:
+         sep=True,
+         attn_implementation='sdpa',
+         stage2_retrieval_top_n=args.stage2_retrieval_top_n,
++        use_kg_retrieval=args.use_kg_retrieval,
++        kg_rank=args.kg_rank,
++        kg_hops=args.kg_hops,
++        kg_damping=args.kg_damping,
+         pure_inference=args.pure_inference
+     )
+ 
+@@ -65,7 +69,8 @@ def setup_model(args: argparse.Namespace) -> CLaRa:
+             training_stage=args.stage,
+             generation_top_k=args.generation_top_k,
+             doc_max_length=args.doc_max_length,
+-            compress_rate=args.compress_rate
++            compress_rate=args.compress_rate,
++            use_kg_retrieval=args.use_kg_retrieval,
+         )
+     else:
+         print("Initializing new model")
+@@ -272,6 +277,15 @@ def create_argument_parser() -> argparse.ArgumentParser:
+                             help="Use MIPS for stage2 retrieval")
+     clara_group.add_argument("--stage2_retrieval_top_n", type=int, default=1, 
+                             help="Top-n documents for stage2 retrieval")
++    # Multi hop KG retrieval
++    clara_group.add_argument("--use_kg_retrieval", action="store_true", default=False,
++                            help="Enable multi-hop temporal-link-matrix retrieval")
++    clara_group.add_argument("--kg_rank", type=int, default=64,
++                            help="Low-rank projection dim for the link matrix")
++    clara_group.add_argument("--kg_hops", type=int, default=2,
++                            help="Propagation hops (2 for HotpotQA/2Wiki, up to 4 for MuSiQue)")
++    clara_group.add_argument("--kg_damping", type=float, default=0.5,
++                            help="Damping factor a in [0,1]; a=0 recovers the baseline pipeline exactly")
+     clara_group.add_argument("--mse_loss", action="store_true", default=False, 
+                             help="Add MSE loss during compression training")
+     clara_group.add_argument("--do_eval_gen", action="store_true", default=False, 
+diff --git a/openrlhf/models/modeling_clara.py b/openrlhf/models/modeling_clara.py
+index 43cee7e..8709dbe 100644
+--- a/openrlhf/models/modeling_clara.py
++++ b/openrlhf/models/modeling_clara.py
+@@ -2,6 +2,7 @@
+ # For licensing see accompanying LICENSE file.
+ # Copyright (C) 2025 Apple Inc. All Rights Reserved.
+ #
++from openrlhf.models.temporal_link_matrix import TemporalLinkMatrix, multi_hop_propagate
+ 
+ import warnings
+ import os
+@@ -159,6 +160,10 @@ class CLaRaConfig(PretrainedConfig):
+                  ae_mode: str = "token",
+                  max_new_tokens: int = 128,
+                  stage2_retrieval_top_n: int = 1,
++                 use_kg_retrieval: bool = False,
++                 kg_rank: int = 64,
++                 kg_hops: int = 2,
++                 kg_damping: float = 0.5,
+                  load_pretrained_checkpoint: bool = False,
+                  device_map=None,
+                  auto_map: dict = {
+@@ -204,6 +209,12 @@ class CLaRaConfig(PretrainedConfig):
+         self.generation_top_k = generation_top_k
+         self.stage2_retrieval_top_n = stage2_retrieval_top_n
+         
++        # multi-hop KG extension
++        self.use_kg_retrieval = use_kg_retrieval
++        self.kg_rank = kg_rank
++        self.kg_hops = kg_hops
++        self.kg_damping = kg_damping
++
+         if training_form == 'compressor':
+             assert compr_model_name is not None and not self.lora
+ 
+@@ -339,6 +350,21 @@ class CLaRa(PreTrainedModel):
+         self.n_mem_tokens = self.doc_max_length // self.compr_rate
+         self.hidden_size = self.decoder.config.hidden_size
+         
++        # --- multi-hop KG extension ---
++        self.use_kg_retrieval = getattr(cfg, 'use_kg_retrieval', False)
++        self.kg_hops = getattr(cfg, 'kg_hops', 2)
++        self.kg_damping = getattr(cfg, 'kg_damping', 0.5)
++        if self.use_kg_retrieval:
++            flattened_doc_dim = self.n_mem_tokens * self.hidden_size  # matches the
++            # .reshape(B, stage2_retrieval_top_n, -1) flattening already done in
++            # _forward_stage2_batch -- NOT self.hidden_size alone.
++            self.link_module = TemporalLinkMatrix(
++                hidden_dim=flattened_doc_dim, rank=getattr(cfg, 'kg_rank', 64)
++            )
++        else:
++            self.link_module = None
++        # --- end multi-hop KG extension ---
++
+         # Setup adapters and memory token optimization
+         if self.lora:
+             self._setup_adapter_training()
+@@ -1205,6 +1231,10 @@ class CLaRa(PreTrainedModel):
+                 os.path.join(save_directory, "decoder_first_last_layers.pth")
+             )
+             
++            # Temporal Link Matrix addition
++            if self.use_kg_retrieval:
++                torch.save(self.link_module.state_dict(), os.path.join(save_directory, "link_module.pth"))
++
+             # Save configuration
+             self.config.save_pretrained(save_directory)
+         else:
+@@ -1266,6 +1296,16 @@ class CLaRa(PreTrainedModel):
+                 for key in first_and_last_decoder_state_dict:
+                     assert key in model.decoder.state_dict()
+                 model.decoder.load_state_dict(first_and_last_decoder_state_dict, strict=False)
++                # Temporal Link Matrix addition
++                if model.use_kg_retrieval:
++                    link_module_path = os.path.join(pretrained_model_name_or_path, "link_module.pth")
++                    if os.path.exists(link_module_path):
++                        model.link_module.load_state_dict(
++                            torch.load(link_module_path, map_location=map_location, weights_only=True)
++                        )
++                    else:
++                        print(f'use_kg_retrieval=True but no link_module.pth at {link_module_path} '
++                            f'-- using random init (expected for a fresh KG run)')
+             else:
+                 print(f'First and last layer not found: {first_and_last_layers_path}')
+ 
+@@ -1455,9 +1495,24 @@ class CLaRa(PreTrainedModel):
+                 F.normalize(retrieved_doc_embeddings, dim=-1, p=2).float().transpose(1, 2)
+             ).squeeze(1)
+             
++            if self.use_kg_retrieval:
++                cand_mask = torch.ones(B, stage2_retrieval_top_n, dtype=torch.bool, device=scores.device)
++                L = self.link_module(retrieved_doc_embeddings.float(), query_reps.float(), cand_mask)
++                scores_for_topk = multi_hop_propagate(
++                    scores.float(), L, hops=self.kg_hops, damping=self.kg_damping
++                ).to(scores.dtype)
++            else:
++                scores_for_topk = scores
++
++            z, topk_idx = differentiable_topk(scores_for_topk, self.generation_top_k, temperature=0.02)
++            selected = torch.einsum('bkn,bnd->bkd', z.to(retrieved_doc_embeddings.dtype), retrieved_doc_embeddings)
++            selected = selected.view(selected.size(0) * selected.size(1), -1, self.hidden_size)
++
++            """ Before Temporal Link Matrix update
+             z, topk_idx = differentiable_topk(scores, self.generation_top_k, temperature=0.02)
+             selected = torch.einsum('bkn,bnd->bkd', z.to(retrieved_doc_embeddings.dtype), retrieved_doc_embeddings)
+             selected = selected.view(selected.size(0) * selected.size(1), -1, self.hidden_size)
++            """
+ 
+         inputs_embeds = self._replace_emb_stage2(selected, dec_input_ids)
+         
+diff --git a/scripts/eval_e2e_kg_cr4.sh b/scripts/eval_e2e_kg_cr4.sh
+new file mode 100644
+index 0000000..707d2cd
+--- /dev/null
++++ b/scripts/eval_e2e_kg_cr4.sh
+@@ -0,0 +1,48 @@
++#!/bin/bash
++#SBATCH --partition=gpus48
++#SBATCH --gres=gpu:4
++#SBATCH --output=/vol/biomedic3/vd425/clara-main/logs/eval_stage2_cr4_kg_%j.log
++#SBATCH --time=23:59:59
++#SBATCH --job-name=eval_stage2_cr4_kg
++
++set -ex
++
++source /vol/cuda/12.9.0/setup.sh
++export CUDA_HOME=/vol/cuda/12.9.0
++export PATH=$CUDA_HOME/bin:$PATH
++export NCCL_P2P_DISABLE=1
++export NCCL_IB_DISABLE=1
++export HF_HOME=/vol/biomedic3/vd425/.cache/huggingface
++export HF_DATASETS_CACHE=/vol/biomedic3/vd425/.cache/huggingface/datasets
++export HF_HUB_OFFLINE=1
++export TRITON_CACHE_DIR=/vol/biomedic3/vd425/.cache/triton
++export TORCH_EXTENSIONS_DIR=/vol/biomedic3/vd425/.cache/torch_extensions
++export TMPDIR=/vol/biomedic3/vd425/.tmp
++export MPLCONFIGDIR=/vol/biomedic3/vd425/.cache/matplotlib
++export PYTHONUNBUFFERED=1
++mkdir -p $HF_HOME $HF_DATASETS_CACHE $TRITON_CACHE_DIR $TORCH_EXTENSIONS_DIR $TMPDIR $MPLCONFIGDIR
++
++source /vol/biomedic3/vd425/clara-main/ml-clara/.venv/bin/activate
++
++BASE_DIR=/vol/biomedic3/vd425/clara-main
++CKPT_PATH=$BASE_DIR/checkpoints/stage2_kg/cr4
++
++unset PYTHONPATH
++export PYTHONPATH=$BASE_DIR/ml-clara:$CKPT_PATH
++
++# One-line pre-flight check, cheap and fast (no GPU touched), confirming
++# use_kg_retrieval actually made it into this checkpoint's config.json
++# before spending a 4-GPU allocation on it.
++python -c "import json; cfg = json.load(open('$CKPT_PATH/config.json')); assert cfg.get('use_kg_retrieval') is True, f'use_kg_retrieval={cfg.get(\"use_kg_retrieval\")} -- aborting'; print('OK: KG config confirmed, kg_rank=%s kg_hops=%s kg_damping=%s' % (cfg.get('kg_rank'), cfg.get('kg_hops'), cfg.get('kg_damping')))"
++
++accelerate launch \
++    --num_processes=4 \
++    --num_machines=1 \
++    --mixed_precision=bf16 \
++    $BASE_DIR/ml-clara/evaluation/evaluate.py \
++        --model_path  "$CKPT_PATH" \
++        --stage       stage2 \
++        --dataset     nq,hotpotqa,musique,2wiki \
++        --generation_top_k 5 \
++        --batch_size  4 \
++        ${MAX_SAMPLES:+--max_samples $MAX_SAMPLES}
+\ No newline at end of file
+diff --git a/scripts/stage2_cr4_kg.sh b/scripts/stage2_cr4_kg.sh
+new file mode 100644
+index 0000000..fcb7bf6
+--- /dev/null
++++ b/scripts/stage2_cr4_kg.sh
+@@ -0,0 +1,160 @@
++#!/bin/bash
++#SBATCH --partition=gpus48
++#SBATCH --gres=gpu:4
++#SBATCH --output=/vol/biomedic3/vd425/clara-main/logs/stage2_cr4_kg_%j.log
++#SBATCH --time=4-11:59:00
++#SBATCH --job-name=clara_stage2_cr4_kg
++
++set -ex
++
++# ─────────────────────────────────────────
++# Environment
++# ─────────────────────────────────────────
++source /vol/cuda/12.9.0/setup.sh
++
++export CUDA_HOME=/vol/cuda/12.9.0
++export UV_CACHE_DIR=/vol/biomedic3/vd425/.cache/uv
++export PATH=$CUDA_HOME/bin:$PATH
++export NCCL_DEBUG=INFO
++export NCCL_P2P_DISABLE=1
++export NCCL_IB_DISABLE=1
++export HF_HOME=/vol/biomedic3/vd425/.cache/huggingface
++export HF_DATASETS_CACHE=/vol/biomedic3/vd425/.cache/huggingface/datasets
++export TRITON_CACHE_DIR=/vol/biomedic3/vd425/.cache/triton
++export TORCH_EXTENSIONS_DIR=/vol/biomedic3/vd425/.cache/torch_extensions
++export TMPDIR=/vol/biomedic3/vd425/.tmp
++export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
++mkdir -p $HF_HOME $HF_DATASETS_CACHE $TRITON_CACHE_DIR $TORCH_EXTENSIONS_DIR $TMPDIR
++
++source /vol/biomedic3/vd425/clara-main/ml-clara/.venv/bin/activate
++export PYTHONPATH=/vol/biomedic3/vd425/clara-main/ml-clara:$PYTHONPATH
++
++nvcc --version
++python -c "import torch; print('torch:', torch.__version__, '| cuda:', torch.version.cuda)"
++
++# Fail fast if the new module isn't where it needs to be, rather than 40 minutes
++# into model loading on 4 GPUs.
++python -c "from openrlhf.models.temporal_link_matrix import TemporalLinkMatrix, multi_hop_propagate" \
++    || { echo "ERROR: openrlhf/models/temporal_link_matrix.py not found/importable. Aborting."; exit 1; }
++
++# ─────────────────────────────────────────
++# Config
++# ─────────────────────────────────────────
++CR=4
++NUM_GPUS=${SLURM_GPUS_ON_NODE:-4}
++BASE_DIR=/vol/biomedic3/vd425/clara-main
++
++MODEL_PATH=$BASE_DIR/models/Mistral-7B-Instruct-v0.2
++PRETRAIN_CHECKPOINT=$BASE_DIR/checkpoints/stage1_2/cr${CR}
++
++# Same data as the baseline run -- identical pool, identical positives-guaranteed
++# setup, so the ONLY difference between this run and stage2_e2e_cr4.sh is the
++# KG flags and the widened candidate pool below. That's what makes the two
++# runs a valid A/B comparison.
++DATA_PATH="$BASE_DIR/data/e2e_training_ours_*_with_pos/train-*.parquet"
++
++SAVE_PATH=$BASE_DIR/checkpoints/stage2_kg/cr${CR}
++mkdir -p $SAVE_PATH $BASE_DIR/logs
++
++echo "Using ${NUM_GPUS} GPUs"
++echo "Pretrain checkpoint: ${PRETRAIN_CHECKPOINT}  (stage1_2 -- link_module has no prior"
++echo "  weights here and will train from a fresh random init during this run, same as"
++echo "  query_reasoner_adapter does on any first stage2 run)"
++echo "Train data: ${DATA_PATH}"
++
++# ─────────────────────────────────────────
++# Training command
++# ─────────────────────────────────────────
++# Differences from the non-KG baseline (stage2_e2e_cr4.sh), and why:
++#
++#   --stage2_retrieval_top_n 100   Widened candidate pool. The KG module needs a
++#                                  real graph to link across; at the baseline's
++#                                  implicit top_n (== generation_top_k == 5) there
++#                                  are only 5 candidates and almost nothing to hop
++#                                  between. 100 matches the paper's worked example.
++#   --generation_top_k 5           UNCHANGED from baseline, deliberately. This is
++#                                  NOT a free knob -- the training data
++#                                  (e2e_training_ours_*_with_pos) was built with a
++#                                  FIXED 5 documents per example, and the collate
++#                                  function's decoder prompt construction bakes in
++#                                  exactly that many <MEM> token blocks per example
++#                                  at data-loading time, independent of any KG
++#                                  changes. Raising this without matching training
++#                                  data causes a slot-count mismatch between the
++#                                  prompt's <MEM> blocks and the number of document
++#                                  embeddings the model tries to write into them.
++#                                  The KG module widens the CANDIDATE POOL it scores
++#                                  over (stage2_retrieval_top_n), not the final
++#                                  selection count fed to the generator -- those are
++#                                  separate knobs; only the former is safe to widen
++#                                  here.
++#   --use_kg_retrieval              Turns on the link module in _forward_stage2_batch.
++#   --kg_rank 64 / --kg_hops 2 / --kg_damping 0.5   Defaults from the write-up
++#                                  (E=512, r=64 worked example; hops=2 matches
++#                                  HotpotQA/2WikiMultiHopQA's typical hop count).
++#
++# Everything else (data, epochs, LR, batch sizes, precision, checkpointing
++# cadence) is left IDENTICAL to the baseline script on purpose.
++training_commands=(
++    openrlhf.cli.train_sft
++    --pretrain "$MODEL_PATH"
++    --pretrain_checkpoint "$PRETRAIN_CHECKPOINT"
++    --stage stage2
++    --compress_rate "$CR"
++    --doc_max_length 256
++    --dataset "$DATA_PATH"
++    --max_len 1024
++    --train_batch_size 32
++    --micro_train_batch_size 1
++    --save_path "$SAVE_PATH"
++    --ckpt_path "$SAVE_PATH/checkpoints"
++    --save_steps -2
++    --save_hf_ckpt
++    --logging_steps 1
++    --eval_steps 100
++    --zero_stage 2
++    --max_epochs 1
++    --bf16
++    --flash_attn
++    --learning_rate 5e-6
++    --lr_scheduler constant
++    --gradient_checkpointing
++    --stage2_retrieval_top_n 100
++    --generation_top_k 5
++    --use_kg_retrieval
++    --kg_rank 64
++    --kg_hops 2
++    --kg_damping 0.5
++    --qa_loss
++    --do_eval_gen
++)
++
++# ─────────────────────────────────────────
++# Launch
++# ─────────────────────────────────────────
++DISTRIBUTED_ARGS="--nproc_per_node ${NUM_GPUS} \
++    --nnodes 1 \
++    --rdzv_id 104 \
++    --rdzv_backend c10d \
++    --rdzv_endpoint 127.0.0.1:29504 \
++    --master_addr 127.0.0.1 \
++    --master_port 29504 \
++    --node_rank 0"
++
++nvidia-smi
++echo "Starting Stage 2 (end-to-end, KG-augmented) training — compression rate ${CR}x on ${NUM_GPUS} GPUs"
++torchrun $DISTRIBUTED_ARGS -m "${training_commands[@]}"
++
++# Sanity check: confirm the link module actually got saved, not just the usual files.
++if [ -f "$SAVE_PATH/link_module.pth" ]; then
++    echo "OK: link_module.pth found in $SAVE_PATH"
++else
++    echo "WARNING: link_module.pth NOT found in $SAVE_PATH -- KG weights were not persisted."
++fi
++
++# Copy model definition (and the new module) alongside checkpoint, matching
++# the baseline script's existing convention.
++cp $BASE_DIR/ml-clara/openrlhf/models/modeling_clara.py $SAVE_PATH
++cp $BASE_DIR/ml-clara/openrlhf/models/temporal_link_matrix.py $SAVE_PATH
++
++echo "Done!"
+\ No newline at end of file
+diff --git a/scripts/temporal_link_matrix.py b/scripts/temporal_link_matrix.py
+index 741d988..e8ffff1 100644
+--- a/scripts/temporal_link_matrix.py
++++ b/scripts/temporal_link_matrix.py
+@@ -1,14 +1,18 @@
+ """
+-Sketch: differentiable temporal-link multi-hop retrieval module for CLaRa.
++Differentiable temporal-link multi-hop retrieval module for CLaRa.
+ 
+-Slots into the existing pipeline as:
+-
+-    Q -> Dict(cos-sim over 100 candidates) -> KG(this file) -> top-20 (existing differentiable_topk) -> Ans
++Implements Eqs. (1)-(11) of the multi-hop extension write-up:
++    Q -> Dict(cos-sim over D candidates) -> KG(this file) -> top-k (differentiable_topk) -> Ans
+ 
+ All ops are differentiable end-to-end via the same straight-through (ST) trick
+-already used in modeling_clara.py's differentiable_topk, so no new loss labels
+-are required -- gradients from the NTP loss on the answer still reach theta_qr,
+-theta_c, and the new link-matrix params (theta_link).
++already used in modeling_clara.py's differentiable_topk, so no new supervision
++is required -- gradients from the NTP loss on the answer reach theta_qr, theta_c,
++and the new link-matrix params {W_src, W_dst, W_q, R} through the same path as
++the existing top-k selection.
++
++This file is intentionally dependency-free w.r.t. modeling_clara.py (no import
++of CLaRa internals) so it can be unit-tested in isolation -- see the __main__
++block and tests/test_temporal_link_matrix.py.
+ """
+ import torch
+ import torch.nn as nn
+@@ -18,120 +22,213 @@ import torch.nn.functional as F
+ class TemporalLinkMatrix(nn.Module):
+     """
+     Learns a directed, query-conditioned adjacency over the D candidate
+-    document embeddings, analogous to the DNC's temporal link matrix:
+-    L[b, i, j] ~ "how useful is it to hop from doc i to doc j, given q".
+-
+-    Kept deliberately close to modeling_clara.py's style (explicit B/D/E
+-    dims, per-row softmax with additive log-mask) so it's easy to review
+-    next to differentiable_topk / differentiable_topk_top_1.
++    document embeddings: L[b, i, j] ~ "how useful is it to hop from doc i to
++    doc j, given q" (Eqs. 3-5 of the write-up).
++
++    Parameters
++    ----------
++    hidden_dim : int
++        E, the compressor embedding dimension (must match CLaRa's hidden_size,
++        i.e. the last dim of the retrieved_doc_embeddings tensor).
++    rank : int
++        r, the low-rank projection dim. r << E keeps the D x D bilinear
++        comparison cheap at D=100. Default 64, per the write-up's worked
++        example (E=512, r=64).
+     """
+ 
+-    def __init__(self, hidden_dim: int, rank: int = 128):
++    def __init__(self, hidden_dim: int, rank: int = 64):
+         super().__init__()
+-        # Low-rank bilinear form keeps this cheap at D=100: (D x r) @ (r x r) @ (r x D)
++        self.hidden_dim = hidden_dim
++        self.rank = rank
++        # W_src, W_dst: independent projections, no bias, no weight tying (see
++        # "Role separation" in the design rationale -- tying them would force
++        # L_ij == L_ji and undo the asymmetry R is introduced to provide).
+         self.proj_src = nn.Linear(hidden_dim, rank, bias=False)
+         self.proj_dst = nn.Linear(hidden_dim, rank, bias=False)
+-        self.rel = nn.Parameter(torch.eye(rank) * 0.01)  # init near-identity, small
+-        # Query conditions the edge scores (a link is only useful for THIS question)
++        # R: bilinear form, initialised near-identity/small so the *initial*
++        # L is close to uniform rather than confidently (and randomly) peaked
++        # before training has learned anything.
++        self.rel = nn.Parameter(torch.eye(rank) * 0.01)
++        # W_q: query-conditioning gate. Small init keeps early tanh activations
++        # near the origin (gate ~= 0 by default), avoiding saturation.
+         self.query_gate = nn.Linear(hidden_dim, rank, bias=False)
+ 
++        nn.init.normal_(self.proj_src.weight, std=0.02)
++        nn.init.normal_(self.proj_dst.weight, std=0.02)
++        nn.init.normal_(self.query_gate.weight, std=0.02)
++
+     def forward(self, M: torch.Tensor, q: torch.Tensor, cand_mask: torch.Tensor,
+                 temperature: float = 1.0) -> torch.Tensor:
+         """
+         Args:
+-            M:  [B, D, E]  candidate (flattened) memory-token embeddings, D=100
+-            q:  [B, E]     query embedding (same space as M, from theta_qr)
++            M: [B, D, E] candidate (flattened) memory-token embeddings
++            q: [B, E]    query embedding, same space as M (from theta_qr)
+             cand_mask: [B, D] bool, True for valid (non-padded) candidates
+         Returns:
+-            L: [B, D, D] row-stochastic directed link matrix (soft "edges")
++            L: [B, D, D] row-stochastic directed link matrix (Eq. 5).
++               Rows for fully-masked queries are all-zero (nan_to_num'd),
++               not uniform -- so a padded candidate contributes no outgoing
++               relevance either.
+         """
+         B, D, E = M.shape
+-        src = self.proj_src(M)                       # [B, D, r]
+-        dst = self.proj_dst(M)                        # [B, D, r]
+-        gate = torch.tanh(self.query_gate(q)).unsqueeze(1)  # [B, 1, r]
+-
+-        src = src * (1.0 + gate)                       # query-condition the source side
+-        logits = torch.einsum("bir,rs,bjs->bij", src, self.rel, dst) / (E ** 0.5)
+-
+-        # mask invalid candidates (padding) and self-loops
+-        pad = (~cand_mask).unsqueeze(1).expand(-1, D, -1)      # [B, D, D]
++        assert E == self.hidden_dim, (
++            f"TemporalLinkMatrix hidden_dim={self.hidden_dim} does not match "
++            f"candidate embedding dim={E}. Check compr_rate / hidden_size wiring."
++        )
++        compute_dtype = self.proj_src.weight.dtype
++        M = M.to(compute_dtype)
++        q = q.to(compute_dtype)
++
++        src = self.proj_src(M)                                # [B, D, r]
++        dst = self.proj_dst(M)                                # [B, D, r]
++        gate = torch.tanh(self.query_gate(q)).unsqueeze(1)     # [B, 1, r]
++
++        src = src * (1.0 + gate)                               # Eq. 3, query-conditioned source
++        logits = torch.einsum("bir,rs,bjs->bij", src, self.rel, dst) / (self.rank ** 0.5)
++        # NOTE: the write-up divides by sqrt(E) (Vaswani-style scaling on the
++        # embedding dim); we scale by sqrt(rank) instead since the bilinear
++        # form actually operates in the r-dimensional projected space, which
++        # keeps logits in a stable range across different `rank` choices.
++        # If you need to match the paper equation literally, divide by E**0.5.
++
++        pad = (~cand_mask).unsqueeze(1).expand(-1, D, -1)       # [B, D, D], j is masked
+         eye = torch.eye(D, device=M.device, dtype=torch.bool).unsqueeze(0)
+         logits = logits.masked_fill(pad | eye, float("-inf"))
+ 
+         L = F.softmax(logits / max(temperature, 1e-6), dim=-1)  # row-stochastic
+-        L = torch.nan_to_num(L, nan=0.0)  # rows that are fully masked -> all-zero row
++        L = torch.nan_to_num(L, nan=0.0)  # fully-masked rows -> all-zero row
+         return L
+ 
+ 
+ def multi_hop_propagate(s0: torch.Tensor, L: torch.Tensor, hops: int = 2,
+                          damping: float = 0.5) -> torch.Tensor:
+     """
+-    Personalized-PageRank-style propagation of the base retrieval scores
+-    through the learned link matrix, so a document's final score reflects
+-    both direct query similarity AND being reachable from other relevant docs.
+-
+-        s_(t+1) = (1 - damping) * s0 + damping * L^T @ s_(t)
++    Personalized-PageRank propagation of base retrieval scores through L
++    (Eqs. 9-10). s0 is treated as the personalization/reset distribution.
+ 
+     Args:
+-        s0: [B, D]    initial scores, e.g. cos(q, M_i) from the existing Dict stage
++        s0: [B, D]    initial scores, e.g. cos(q, M_i), possibly containing
++                       -inf for padded candidates (masked_fill'd upstream).
+         L:  [B, D, D] output of TemporalLinkMatrix
+-        hops: number of propagation steps (2-3 to match typical HotpotQA/MuSiQue hop counts)
++        hops: T, number of propagation steps (2 for HotpotQA/2WikiMultiHopQA,
++              up to 4 for MuSiQue per the write-up).
++        damping: a in [0, 1]. a=0 recovers the current (no-KG) pipeline exactly.
+     Returns:
+-        s_final: [B, D] graph-informed relevance scores, feed straight into
+-                  the existing differentiable_topk(logits=s_final, k=20)
++        s_final: [B, D] graph-informed relevance scores, safe to feed straight
++                  into differentiable_topk (no -inf/nan; padded slots -> ~0).
+     """
+-    s = F.softmax(s0, dim=-1)
+-    s0_soft = s.clone()
++    # Force fp32 explicitly at every step. Under bf16 autocast (e.g. DeepSpeed's
++    # --bf16, which wraps the whole forward() call), torch.einsum is on the
++    # "cast to lower precision" list -- it silently downcasts fp32 inputs to
++    # bf16 for the op AND returns bf16, regardless of what dtype was passed
++    # in. Relying on the caller's .float() alone is not sufficient: after one
++    # loop iteration `s` becomes bf16 from the einsum's own output, and the
++    # next iteration's implicit L(fp32)/s(bf16) mix raises
++    # "expected scalar type Float but found BFloat16". Casting inside the
++    # loop on every use makes this immune to ambient autocast state.
++    s0_soft = F.softmax(s0.float(), dim=-1)  # softmax(-inf) -> 0 for padded slots
++    s = s0_soft.clone()
+     for _ in range(hops):
+-        s = (1 - damping) * s0_soft + damping * torch.einsum("bij,bi->bj", L, s)
++        propagated = torch.einsum("bij,bi->bj", L.float(), s.float())
++        s = (1 - damping) * s0_soft + damping * propagated
+     return s
+ 
+ 
++def order_by_hop(topk_idx: torch.Tensor, L: torch.Tensor, s0: torch.Tensor,
++                  hops: int, damping: float) -> torch.Tensor:
++    """
++    Step 5 (evidence ordering): order the k selected documents by the hop
++    at which each first "crossed the selection threshold" -- approximated
++    here as the hop at which each selected doc's running propagated score
++    first exceeds its own s0 baseline by a growing margin, i.e. the earliest
++    hop at which it is receiving meaningful incoming relevance rather than
++    just its direct-similarity floor. Bridge documents (found at hop 0,
++    since they score reasonably against q directly) sort before pure
++    targets (which only light up after propagation).
++
++    This is a best-effort, differentiable-pipeline-compatible ordering: it
++    only permutes indices (no gradient needed through the ordering itself,
++    only through which docs got selected and their embeddings), so it is
++    applied with torch.no_grad().
++
++    Args:
++        topk_idx: [B, k] indices into the D candidates, from differentiable_topk
++        L, s0: as above
++        hops, damping: same values used in multi_hop_propagate
++    Returns:
++        reordered_topk_idx: [B, k], same index set, reordered along dim=1
++        perm: [B, k] the permutation applied (useful for reordering embeddings)
++    """
++    with torch.no_grad():
++        B, k = topk_idx.shape
++        # Same explicit-fp32-under-autocast fix as multi_hop_propagate above.
++        s0_soft = F.softmax(s0.float(), dim=-1)
++        s = s0_soft.clone()
++        first_hop = torch.full((B, s0.shape[1]), hops, device=s0.device, dtype=torch.long)
++        gathered_hop = torch.zeros(B, k, device=s0.device, dtype=torch.long)
++        for t in range(hops):
++            propagated = torch.einsum("bij,bi->bj", L.float(), s.float())
++            s = (1 - damping) * s0_soft + damping * propagated
++            gained = torch.gather(s, 1, topk_idx) > torch.gather(s0_soft, 1, topk_idx) * 1.05
++            newly_arrived = gained & (torch.gather(first_hop, 1, topk_idx) == hops)
++            src_val = torch.full_like(gathered_hop, t)
++            gathered_hop = torch.where(newly_arrived, src_val, gathered_hop)
++            first_hop.scatter_(1, topk_idx, torch.where(newly_arrived, src_val, torch.gather(first_hop, 1, topk_idx)))
++        gathered_hop = torch.where(gathered_hop == 0, torch.gather(first_hop, 1, topk_idx).clamp(max=0), gathered_hop)
++        perm = gathered_hop.argsort(dim=1, stable=True)
++        reordered_topk_idx = torch.gather(topk_idx, 1, perm)
++        return reordered_topk_idx, perm
++
++
+ if __name__ == "__main__":
+     torch.manual_seed(0)
+-    B, D, E = 2, 100, 512  # batch, candidate pool (was 20, now widened to 100), hidden dim
++    B, D, E = 2, 100, 512
+ 
+     M = torch.randn(B, D, E, requires_grad=True)
+     q = torch.randn(B, E, requires_grad=True)
+     cand_mask = torch.ones(B, D, dtype=torch.bool)
+-    cand_mask[0, 80:] = False  # simulate a shorter candidate list for sample 0
++    cand_mask[0, 80:] = False
+ 
+     link_module = TemporalLinkMatrix(hidden_dim=E, rank=64)
+     L = link_module(M, q, cand_mask)
+-    print("L shape:", L.shape, "row sums (should be ~1 or 0 for fully masked rows):")
+-    print(L.sum(-1)[:, :5])
++    assert L.shape == (B, D, D)
++    row_sums = L.sum(-1)
++    assert torch.allclose(row_sums[cand_mask], torch.ones_like(row_sums[cand_mask]), atol=1e-4)
++    print("[ok] L row-stochastic where valid, shape", L.shape)
+ 
+-    s0 = F.cosine_similarity(q.unsqueeze(1), M, dim=-1)  # [B, D], the existing "Dict" score
++    s0 = F.cosine_similarity(q.unsqueeze(1), M, dim=-1)
+     s0 = s0.masked_fill(~cand_mask, float("-inf"))
+     s_final = multi_hop_propagate(s0, L, hops=2, damping=0.5)
+-    print("s_final shape:", s_final.shape, "sums:", s_final.sum(-1))
++    assert torch.isfinite(s_final).all()
++    print("[ok] s_final finite, shape", s_final.shape)
++
++    from torch.nn.functional import softmax as _sm
+ 
+-    # Reuse the EXISTING differentiable_topk from modeling_clara.py unchanged:
+     def differentiable_topk(logits, k, temperature=1.0):
+-        B, N = logits.shape
++        Bb, N = logits.shape
+         perturbed = logits / max(temperature, 1e-6)
+         topk_vals, topk_idx = perturbed.topk(k, dim=-1)
+-        K_hard = torch.zeros(B, k, N, device=logits.device, dtype=logits.dtype)
++        K_hard = torch.zeros(Bb, k, N, device=logits.device, dtype=logits.dtype)
+         K_hard.scatter_(2, topk_idx.unsqueeze(-1), 1.0)
+         K_soft = torch.zeros_like(K_hard)
+-        taken = torch.zeros(B, N, device=logits.device, dtype=logits.dtype)
++        taken = torch.zeros(Bb, N, device=logits.device, dtype=logits.dtype)
+         for j in range(k):
+             mask = (1.0 - taken.detach())
+             masked = perturbed + (mask + 1e-8).log()
+-            pj = F.softmax(masked, dim=-1).float()
++            pj = _sm(masked, dim=-1).float()
+             K_soft[:, j, :] = pj
+             taken = torch.clamp(taken + K_hard[:, j, :], max=1.0)
+         W = K_hard + (K_soft - K_soft.detach())
+         return W, topk_idx
+ 
+-    s_final_filled = torch.nan_to_num(s_final, nan=float("-inf"))
+-    Z, topk_idx = differentiable_topk(s_final_filled, k=20)
+-    M_selected = torch.einsum("bkd,bde->bke", Z, M)  # [B, 20, E] -> feed to generator
+-    print("M_selected shape:", M_selected.shape)
++    Z, topk_idx = differentiable_topk(torch.nan_to_num(s_final, nan=float("-inf")), k=20)
++    M_selected = torch.einsum("bkd,bde->bke", Z, M)
++    print("[ok] M_selected", M_selected.shape)
++
++    reordered_idx, perm = order_by_hop(topk_idx, L, s0, hops=2, damping=0.5)
++    print("[ok] reordered_idx", reordered_idx.shape)
+ 
+-    # Sanity check: gradient flows all the way back to M and q through
+-    # TemporalLinkMatrix, multi_hop_propagate, AND differentiable_topk.
+     loss = M_selected.sum()
+     loss.backward()
+-    print("grad reaches M:", M.grad is not None, "grad reaches q:", q.grad is not None)
+-    print("grad reaches link_module.rel:", link_module.rel.grad is not None)
+\ No newline at end of file
++    assert M.grad is not None and q.grad is not None and link_module.rel.grad is not None
++    print("[ok] gradients reach M, q, and link_module.rel")
+\ No newline at end of file
+-- 
+2.50.1 (Apple Git-155)
+

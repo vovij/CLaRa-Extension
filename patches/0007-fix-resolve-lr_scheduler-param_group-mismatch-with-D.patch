@@ -1,0 +1,300 @@
+From 681266034eb8d9c13a6d8336ce006499ea704216 Mon Sep 17 00:00:00 2001
+From: vovij <ap22292@qmul.ac.uk>
+Date: Fri, 5 Jun 2026 18:54:47 +0100
+Subject: [PATCH 07/17] fix: resolve lr_scheduler param_group mismatch with
+ DeepSpeed ZeRO-2
+
+Problem:
+Training crashed with ValueError: zip() argument 2 is longer/shorter
+than argument 1 inside torch.optim.lr_scheduler._update_lr() at the
+first optimizer step.
+
+Root cause:
+get_optimizer_grouped_parameters() returned 2 param groups (one with
+weight decay for non-bias/norm params, one without for bias/norm params).
+DeepSpeed ZeRO-2 internally merges these into a single param group during
+deepspeed.initialize(). The lr_scheduler was built against the original
+2-group optimizer, so scheduler.base_lrs had 2 entries while
+optimizer.param_groups had 1. PyTorch scheduler uses
+zip(self.base_lrs, self.optimizer.param_groups, strict=True) which
+raised the mismatch error.
+
+Fix:
+Simplified get_optimizer_grouped_parameters() in deepspeed_utils.py
+to return a single param group containing all trainable parameters.
+This ensures the scheduler and optimizer always have a consistent param
+group count before and after DeepSpeed initialization.
+
+No other files were modified. deepspeed.py and train_sft.py remain
+unchanged from the original.
+
+Files changed:
+- openrlhf/utils/deepspeed/deepspeed_utils.py
+    - get_optimizer_grouped_parameters(): return 1 param group instead
+      of 2 (decay vs no-decay split removed)
+
+Note:
+The weight decay distinction between bias/norm params and other params
+is not needed here as all trainable parameters are LoRA adapter weights
+and memory token embeddings which are trained uniformly.
+---
+ .DS_Store                                   | Bin 8196 -> 8196 bytes
+ openrlhf/cli/train_sft.py                   |   2 +-
+ openrlhf/utils/deepspeed/deepspeed.py       |   2 +-
+ openrlhf/utils/deepspeed/deepspeed_utils.py |  22 +----
+ scripts/test.sh                             |  87 ++++++++++++++++++++
+ scripts/test_old.sh                         |  73 ++++++++++++++++
+ 6 files changed, 165 insertions(+), 21 deletions(-)
+ create mode 100644 scripts/test.sh
+ create mode 100644 scripts/test_old.sh
+
+diff --git a/.DS_Store b/.DS_Store
+index a04c89dcbbc2d0997b882e478588f8e541f82ed1..cb143e6ad505b40753908476c554055df0ea1d47 100644
+GIT binary patch
+delta 100
+zcmZp1XmQwJC(0!7ak7Kx6sGWXldp-&v3_-n-!yfyyqM@@J~19RPnmJU#>69xo7pAI
+KS&7$hkP!e2wj-GU
+
+delta 100
+zcmZp1XmQwJC(0xwJJ~^W3X{XZ$=5{XSjEk4uk=rr7ZaV#C&mNkDKk#kn0SP7GrNR2
+KEAbi*G6DePo*m%;
+
+diff --git a/openrlhf/cli/train_sft.py b/openrlhf/cli/train_sft.py
+index d263bbe..84c9662 100644
+--- a/openrlhf/cli/train_sft.py
++++ b/openrlhf/cli/train_sft.py
+@@ -155,7 +155,7 @@ def setup_training_components(args: argparse.Namespace, model: CLaRa, train_data
+         optimizer,
+         num_warmup_steps=math.ceil(max_steps * args.lr_warmup_ratio),
+         num_training_steps=max_steps,
+-        scheduler_specific_kwargs={"min_lr": args.learning_rate * 0.1},
++        scheduler_specific_kwargs={"min_lr": args.learning_rate * 0.1} if args.lr_scheduler == "cosine_with_min_lr" else {},
+     )
+ 
+     # Prepare with strategy — scheduler passed in so DeepSpeed manages it
+diff --git a/openrlhf/utils/deepspeed/deepspeed.py b/openrlhf/utils/deepspeed/deepspeed.py
+index 2568590..fca8b3c 100644
+--- a/openrlhf/utils/deepspeed/deepspeed.py
++++ b/openrlhf/utils/deepspeed/deepspeed.py
+@@ -240,7 +240,7 @@ class DeepspeedStrategy(ABC):
+         engine, optim, _, scheduler = deepspeed.initialize(
+             model=model.model if is_actor else model,
+             optimizer=optim,
+-            lr_scheduler=scheduler,
++            lr_scheduler=scheduler,      # back to original
+             config=ds_config,
+             args={"local_rank": int(os.environ.get("LOCAL_RANK", "-1"))},
+             dist_init_required=True,
+diff --git a/openrlhf/utils/deepspeed/deepspeed_utils.py b/openrlhf/utils/deepspeed/deepspeed_utils.py
+index 99040d3..4874d37 100644
+--- a/openrlhf/utils/deepspeed/deepspeed_utils.py
++++ b/openrlhf/utils/deepspeed/deepspeed_utils.py
+@@ -106,28 +106,12 @@ def get_eval_ds_config(
+     }
+ 
+ 
+-def get_optimizer_grouped_parameters(
+-    model,
+-    weight_decay,
+-    no_decay_name_list=["bias", "layer_norm.weight", "layernorm.weight", "norm.weight", "ln_f.weight"],
+-):
++def get_optimizer_grouped_parameters(model, weight_decay, no_decay_name_list=["bias", "layer_norm.weight", "layernorm.weight", "norm.weight", "ln_f.weight"]):
+     optimizer_grouped_parameters = [
+         {
+-            "params": [
+-                p
+-                for n, p in model.named_parameters()
+-                if (not any(nd in n for nd in no_decay_name_list) and p.requires_grad)
+-            ],
++            "params": [p for n, p in model.named_parameters() if p.requires_grad],
+             "weight_decay": weight_decay,
+-        },
+-        {
+-            "params": [
+-                p
+-                for n, p in model.named_parameters()
+-                if (any(nd in n for nd in no_decay_name_list) and p.requires_grad)
+-            ],
+-            "weight_decay": 0.0,
+-        },
++        }
+     ]
+     return optimizer_grouped_parameters
+ 
+diff --git a/scripts/test.sh b/scripts/test.sh
+new file mode 100644
+index 0000000..395e34f
+--- /dev/null
++++ b/scripts/test.sh
+@@ -0,0 +1,87 @@
++#!/bin/bash
++#SBATCH --partition=gpus48
++#SBATCH --gres=gpu:2
++#SBATCH --output=/vol/biomedic3/vd425/clara-main/logs/test_%j.log
++#SBATCH --time=0-00:59:00
++#SBATCH --job-name=clara_stage1_cr4
++
++set -ex
++
++# ─────────────────────────────────────────
++# Environment
++# ─────────────────────────────────────────
++source /vol/cuda/12.9.0/setup.sh
++
++export CUDA_HOME=/vol/cuda/12.9.0
++export UV_CACHE_DIR=/vol/biomedic3/vd425/.cache/uv
++export PATH=$CUDA_HOME/bin:$PATH
++export NCCL_DEBUG=INFO
++export NCCL_P2P_DISABLE=1
++export NCCL_IB_DISABLE=1
++
++source /vol/biomedic3/vd425/clara-main/ml-clara/.venv/bin/activate
++export PYTHONPATH=/vol/biomedic3/vd425/clara-main/ml-clara:$PYTHONPATH
++
++nvcc --version
++python -c "import torch; print('torch:', torch.__version__, '| cuda:', torch.version.cuda)"
++
++# ─────────────────────────────────────────
++# Config
++# ─────────────────────────────────────────
++CR=4
++NUM_GPUS=${SLURM_GPUS_ON_NODE:-1}
++BASE_DIR=/vol/biomedic3/vd425/clara-main
++MODEL_PATH=$BASE_DIR/models/Mistral-7B-Instruct-v0.2
++DATA_PATH=$BASE_DIR/ml-clara/example/pretrain_data.jsonl
++
++SAVE_PATH=$BASE_DIR/checkpoints/stage1/cr${CR}
++mkdir -p $SAVE_PATH $BASE_DIR/logs
++
++echo "Using ${NUM_GPUS} GPUs"
++
++# ─────────────────────────────────────────
++# Training command
++# ─────────────────────────────────────────
++training_commands="openrlhf.cli.train_sft \
++    --pretrain $MODEL_PATH \
++    --stage stage1 \
++    --compress_rate $CR \
++    --doc_max_length 256 \
++    --dataset $DATA_PATH \
++    --max_len 2048 \
++    --train_batch_size 128 \
++    --micro_train_batch_size 2 \
++    --max_samples 500 \
++    --save_path $SAVE_PATH \
++    --ckpt_path $SAVE_PATH/checkpoints \
++    --save_steps -2 \
++    --save_hf_ckpt \
++    --logging_steps 1 \
++    --eval_steps 20 \
++    --zero_stage 2 \
++    --max_epochs 1 \
++    --bf16 \
++    --flash_attn \
++    --learning_rate 1e-4 \
++    --lr_scheduler cosine_with_min_lr \
++    --gradient_checkpointing \
++    --generation_top_k 1 \
++    --qa_loss \
++    --mse_loss"
++
++# ─────────────────────────────────────────
++# Launch
++# ─────────────────────────────────────────
++DISTRIBUTED_ARGS="--nproc_per_node ${NUM_GPUS} \
++    --nnodes 1 \
++    --rdzv_id 101 \
++    --rdzv_backend c10d \
++    --rdzv_endpoint 127.0.0.1:29501 \
++    --master_addr 127.0.0.1 \
++    --master_port 29501 \
++    --node_rank 0"
++
++nvidia-smi
++echo "Starting Stage 1 training — compression rate ${CR}x on ${NUM_GPUS} GPUs"
++torchrun $DISTRIBUTED_ARGS -m $training_commands
++echo "Done!"
+\ No newline at end of file
+diff --git a/scripts/test_old.sh b/scripts/test_old.sh
+new file mode 100644
+index 0000000..a568bf1
+--- /dev/null
++++ b/scripts/test_old.sh
+@@ -0,0 +1,73 @@
++#!/bin/bash
++#SBATCH --partition=gpus48
++#SBATCH --gres=gpu:2
++#SBATCH --output=/vol/biomedic3/vd425/clara-main/logs/test_%j.log
++#SBATCH --time=0-00:59:00
++#SBATCH --job-name=debug_clara_stage1_cr4
++
++set -ex
++
++# ─────────────────────────────────────────
++# Environment
++# ─────────────────────────────────────────
++source /vol/cuda/12.9.0/setup.sh
++
++export CUDA_HOME=/vol/cuda/12.9.0
++export UV_CACHE_DIR=/vol/biomedic3/vd425/.cache/uv
++export PATH=$CUDA_HOME/bin:$PATH
++
++source /vol/biomedic3/vd425/clara-main/ml-clara/.venv/bin/activate
++
++export PYTHONPATH=/vol/biomedic3/vd425/clara-main/ml-clara:$PYTHONPATH
++
++nvcc --version
++python -c "import torch; print('torch:', torch.__version__, '| cuda:', torch.version.cuda)"
++# ─────────────────────────────────────────
++# Paths
++# ─────────────────────────────────────────
++CR=4
++BASE_DIR=/vol/biomedic3/vd425/clara-main
++MODEL_PATH=$BASE_DIR/models/Mistral-7B-Instruct-v0.2
++DATA_PATH=$BASE_DIR/ml-clara/example/pretrain_data.jsonl  # example data
++
++SAVE_PATH=$BASE_DIR/checkpoints/stage1/cr${CR}
++mkdir -p $SAVE_PATH $BASE_DIR/logs
++
++# ─────────────────────────────────────────
++# Training command
++# ─────────────────────────────────────────
++training_commands="/vol/biomedic3/vd425/clara-main/ml-clara/openrlhf/cli/train_sft.py \
++    --pretrain $MODEL_PATH \
++    --stage stage1 \
++    --compress_rate $CR \
++    --doc_max_length 256 \
++    --dataset $DATA_PATH \
++    --max_len 2048 \
++    --train_batch_size 2 \
++    --micro_train_batch_size 1 \
++    --save_path $SAVE_PATH \
++    --ckpt_path $SAVE_PATH/checkpoints \
++    --save_steps 2000 \
++    --save_hf_ckpt \
++    --logging_steps 1 \
++    --eval_steps 20 \
++    --zero_stage 2 \
++    --max_epochs 1 \
++    --bf16 \
++    --learning_rate 1e-4 \
++    --gradient_checkpointing \
++    --generation_top_k 1 \
++    --qa_loss \
++    --mse_loss"
++
++# ─────────────────────────────────────────
++# Launch
++# ─────────────────────────────────────────
++nvidia-smi
++echo "Starting Stage 1 training — compression rate ${CR}x"
++export NCCL_DEBUG=INFO
++export NCCL_P2P_DISABLE=1
++export NCCL_IB_DISABLE=1
++torchrun --nproc_per_node=2 --master_port=29501 \
++    $training_commands
++echo "Done!"
+\ No newline at end of file
+-- 
+2.50.1 (Apple Git-155)
+

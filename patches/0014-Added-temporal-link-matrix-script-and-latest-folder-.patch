@@ -1,0 +1,485 @@
+From 67b8cd7fa6fdb1533309b8d47c07dcd3fe28dd76 Mon Sep 17 00:00:00 2001
+From: vovij <ap22292@qmul.ac.uk>
+Date: Mon, 20 Jul 2026 17:51:36 +0100
+Subject: [PATCH 14/17] Added temporal link matrix script and latest folder
+ structure doc.
+
+---
+ .DS_Store                       | Bin 8196 -> 8196 bytes
+ folder_structure.txt            | 215 ++++++++++++++++++++++++--------
+ scripts/temporal_link_matrix.py | 137 ++++++++++++++++++++
+ 3 files changed, 300 insertions(+), 52 deletions(-)
+ create mode 100644 scripts/temporal_link_matrix.py
+
+diff --git a/.DS_Store b/.DS_Store
+index 6975cdda94603f5e10069722a151552dcea4dc24..d8af842fcbd7020496918db35d972caae3b6a808 100644
+GIT binary patch
+delta 125
+zcmZp1XmQxEN{s2k$H{BN<k%;0)wQ^=pO}16Odg3XJef<Jk8#0dNpWAMolhoT5LcMo
+VAzsGVu=&6EYBqATvNbS(005(cEV2Lq
+
+delta 125
+zcmZp1XmQxEN{nfT&g3;>a_r|5#1~8dIzIWLm^>0&cruqbA7jI0NpWAMjZY?D5LcMo
+VAzsE<u=&6EYBqATvK26Z001pSF5mzF
+
+diff --git a/folder_structure.txt b/folder_structure.txt
+index 4b9e357..e1eca52 100644
+--- a/folder_structure.txt
++++ b/folder_structure.txt
+@@ -4,24 +4,34 @@ vd425@vm-shell1:/vol/biomedic3/vd425/clara-main$ tree -L 4
+ ├── checkpoints
+ │   ├── CLaRa-7B-E2E
+ │   │   ├── compression-128
++│   │   │   ├── 2wiki_stage2_False_5.jsonl
+ │   │   │   ├── adapters.pth
+ │   │   │   ├── chat_template.jinja
+ │   │   │   ├── config.json
+ │   │   │   ├── decoder_first_last_layers.pth
++│   │   │   ├── hotpotqa_stage2_False_5.jsonl
+ │   │   │   ├── modeling_clara.py
++│   │   │   ├── musique_stage2_False_5.jsonl
+ │   │   │   ├── musique_stage2_True_5.jsonl
++│   │   │   ├── nq_stage2_False_5.jsonl
++│   │   │   ├── results_metrics_stage2_False_5.json
+ │   │   │   ├── special_tokens_map.json
+ │   │   │   ├── tokenizer_config.json
+ │   │   │   ├── tokenizer.json
+ │   │   │   └── tokenizer.model
+ │   │   ├── compression-16
++│   │   │   ├── 2wiki_stage2_False_5.jsonl
+ │   │   │   ├── adapters.pth
+ │   │   │   ├── chat_template.jinja
+ │   │   │   ├── config.json
+ │   │   │   ├── decoder_first_last_layers.pth
+ │   │   │   ├── frames_stage2_False_5.jsonl
++│   │   │   ├── hotpotqa_stage2_False_5.jsonl
+ │   │   │   ├── modeling_clara.py
++│   │   │   ├── musique_stage2_False_5.jsonl
+ │   │   │   ├── musique_stage2_True_5.jsonl
++│   │   │   ├── nq_stage2_False_5.jsonl
++│   │   │   ├── results_metrics_stage2_False_5.json
+ │   │   │   ├── special_tokens_map.json
+ │   │   │   ├── tokenizer_config.json
+ │   │   │   ├── tokenizer.json
+@@ -94,67 +104,126 @@ vd425@vm-shell1:/vol/biomedic3/vd425/clara-main$ tree -L 4
+ │   │       ├── tokenizer_config.json
+ │   │       ├── tokenizer.json
+ │   │       └── tokenizer.model
+-│   └── stage1_2
++│   ├── stage1_2
++│   │   ├── cr128
++│   │   │   ├── adapters.pth
++│   │   │   ├── chat_template.jinja
++│   │   │   ├── checkpoints
++│   │   │   ├── config.json
++│   │   │   ├── decoder_first_last_layers.pth
++│   │   │   ├── modeling_clara.py -> /vol/biomedic3/vd425/clara-main/checkpoints/stage1/cr128/modeling_clara.py
++│   │   │   ├── special_tokens_map.json
++│   │   │   ├── tokenizer_config.json
++│   │   │   ├── tokenizer.json
++│   │   │   └── tokenizer.model
++│   │   ├── cr16
++│   │   │   ├── adapters.pth
++│   │   │   ├── chat_template.jinja
++│   │   │   ├── checkpoints
++│   │   │   ├── config.json
++│   │   │   ├── decoder_first_last_layers.pth
++│   │   │   ├── modeling_clara.py -> /vol/biomedic3/vd425/clara-main/checkpoints/stage1/cr16/modeling_clara.py
++│   │   │   ├── nq_stage1_2_False_5.jsonl
++│   │   │   ├── special_tokens_map.json
++│   │   │   ├── tokenizer_config.json
++│   │   │   ├── tokenizer.json
++│   │   │   └── tokenizer.model
++│   │   ├── cr256
++│   │   │   ├── adapters.pth
++│   │   │   ├── chat_template.jinja
++│   │   │   ├── checkpoints
++│   │   │   ├── config.json
++│   │   │   ├── decoder_first_last_layers.pth
++│   │   │   ├── modeling_clara.py -> /vol/biomedic3/vd425/clara-main/checkpoints/stage1/cr256/modeling_clara.py
++│   │   │   ├── special_tokens_map.json
++│   │   │   ├── tokenizer_config.json
++│   │   │   ├── tokenizer.json
++│   │   │   └── tokenizer.model
++│   │   ├── cr32
++│   │   │   ├── adapters.pth
++│   │   │   ├── chat_template.jinja
++│   │   │   ├── checkpoints
++│   │   │   ├── config.json
++│   │   │   ├── decoder_first_last_layers.pth
++│   │   │   ├── modeling_clara.py -> /vol/biomedic3/vd425/clara-main/checkpoints/stage1/cr32/modeling_clara.py
++│   │   │   ├── special_tokens_map.json
++│   │   │   ├── tokenizer_config.json
++│   │   │   ├── tokenizer.json
++│   │   │   └── tokenizer.model
++│   │   ├── cr4
++│   │   │   ├── 2wiki_stage1_2_False_5.jsonl
++│   │   │   ├── 2wiki_stage1_2_True_5.jsonl
++│   │   │   ├── adapters.pth
++│   │   │   ├── chat_template.jinja
++│   │   │   ├── checkpoints
++│   │   │   ├── config.json
++│   │   │   ├── decoder_first_last_layers.pth
++│   │   │   ├── hotpotqa_stage1_2_False_5.jsonl
++│   │   │   ├── hotpotqa_stage1_2_True_5.jsonl
++│   │   │   ├── modeling_clara.py -> /vol/biomedic3/vd425/clara-main/checkpoints/stage1/cr4/modeling_clara.py
++│   │   │   ├── musique_stage1_2_False_5.jsonl
++│   │   │   ├── musique_stage1_2_True_5.jsonl
++│   │   │   ├── nq_stage1_2_False_5.jsonl
++│   │   │   ├── nq_stage1_2_True_5.jsonl
++│   │   │   ├── results_metrics_stage1_2_False_5.json
++│   │   │   ├── results_metrics_stage1_2_True_5.json
++│   │   │   ├── special_tokens_map.json
++│   │   │   ├── tokenizer_config.json
++│   │   │   ├── tokenizer.json
++│   │   │   └── tokenizer.model
++│   │   └── cr64
++│   │       ├── adapters.pth
++│   │       ├── chat_template.jinja
++│   │       ├── checkpoints
++│   │       ├── config.json
++│   │       ├── decoder_first_last_layers.pth
++│   │       ├── modeling_clara.py -> /vol/biomedic3/vd425/clara-main/checkpoints/stage1/cr64/modeling_clara.py
++│   │       ├── special_tokens_map.json
++│   │       ├── tokenizer_config.json
++│   │       ├── tokenizer.json
++│   │       └── tokenizer.model
++│   └── stage2
+ │       ├── cr128
+-│       │   ├── adapters.pth
+-│       │   ├── chat_template.jinja
+-│       │   ├── checkpoints
+-│       │   ├── config.json
+-│       │   ├── decoder_first_last_layers.pth
+-│       │   ├── special_tokens_map.json
+-│       │   ├── tokenizer_config.json
+-│       │   ├── tokenizer.json
+-│       │   └── tokenizer.model
+ │       ├── cr16
+ │       │   ├── adapters.pth
+ │       │   ├── chat_template.jinja
+ │       │   ├── checkpoints
+ │       │   ├── config.json
+ │       │   ├── decoder_first_last_layers.pth
++│       │   ├── modeling_clara.py
+ │       │   ├── special_tokens_map.json
+ │       │   ├── tokenizer_config.json
+ │       │   ├── tokenizer.json
+ │       │   └── tokenizer.model
+ │       ├── cr256
+-│       │   ├── adapters.pth
+-│       │   ├── chat_template.jinja
+-│       │   ├── checkpoints
+-│       │   ├── config.json
+-│       │   ├── decoder_first_last_layers.pth
+-│       │   ├── special_tokens_map.json
+-│       │   ├── tokenizer_config.json
+-│       │   ├── tokenizer.json
+-│       │   └── tokenizer.model
+ │       ├── cr32
+ │       │   ├── adapters.pth
+ │       │   ├── chat_template.jinja
+ │       │   ├── checkpoints
+ │       │   ├── config.json
+ │       │   ├── decoder_first_last_layers.pth
++│       │   ├── modeling_clara.py
+ │       │   ├── special_tokens_map.json
+ │       │   ├── tokenizer_config.json
+ │       │   ├── tokenizer.json
+ │       │   └── tokenizer.model
+ │       ├── cr4
++│       │   ├── 2wiki_stage2_False_5.jsonl
+ │       │   ├── adapters.pth
+ │       │   ├── chat_template.jinja
+ │       │   ├── checkpoints
+ │       │   ├── config.json
+ │       │   ├── decoder_first_last_layers.pth
++│       │   ├── hotpotqa_stage2_False_5.jsonl
++│       │   ├── modeling_clara.py
++│       │   ├── musique_stage2_False_5.jsonl
++│       │   ├── nq_stage2_False_5.jsonl
++│       │   ├── results_metrics_stage2_False_5.json
+ │       │   ├── special_tokens_map.json
+ │       │   ├── tokenizer_config.json
+ │       │   ├── tokenizer.json
+ │       │   └── tokenizer.model
+ │       └── cr64
+-│           ├── adapters.pth
+-│           ├── chat_template.jinja
+-│           ├── checkpoints
+-│           ├── config.json
+-│           ├── decoder_first_last_layers.pth
+-│           ├── special_tokens_map.json
+-│           ├── tokenizer_config.json
+-│           ├── tokenizer.json
+-│           └── tokenizer.model
+ ├── data
+ │   ├── clara_logo.jpg
+ │   ├── e2e_eval_2wiki_no_pos
+@@ -258,15 +327,7 @@ vd425@vm-shell1:/vol/biomedic3/vd425/clara-main$ tree -L 4
+ │   │   ├── download_57926.log
+ │   │   ├── download_clara_62872.log
+ │   │   ├── download_clara_62877.log
+-│   ├── stage1_cr128_65758.log
+-│   ├── stage1_cr16_65684.log
+-│   ├── stage1_cr256_65672.log
+-│   ├── stage1_cr32_65703.log
+-│   ├── stage1_cr4_multiple_65583.log
+-│   ├── stage1_cr4_multiple_65584.log
+-│   ├── stage1_cr4_multiple_65598.log
+-│   ├── stage1_cr4_multiple_65600.log
+-│   └── stage1_cr64_65718.log
++│   │   └──...
+ ├── ml-clara
+ │   ├── ACKNOWLEDGEMENTS
+ │   ├── CODE_OF_CONDUCT.md
+@@ -366,29 +427,79 @@ vd425@vm-shell1:/vol/biomedic3/vd425/clara-main$ tree -L 4
+ │       ├── tokenizer.json
+ │       └── tokenizer.model
+ ├── results
+-│   └── latent_space_analysis
+-│       ├── effective_rank_vs_cr.png
+-│       ├── embeddings_cr128.npz
+-│       ├── embeddings_cr16.npz
+-│       ├── embeddings_cr256.npz
+-│       ├── embeddings_cr32.npz
+-│       ├── embeddings_cr4.npz
+-│       ├── embeddings_cr64.npz
+-│       ├── orthogonality_stats.json
+-│       ├── tsne_across_cr.png
+-│       └── tsne_by_cr.png
++│   ├── latent_space_analysis
++│   │   ├── effective_rank_vs_cr.png
++│   │   ├── embeddings_cr128.npz
++│   │   ├── embeddings_cr16.npz
++│   │   ├── embeddings_cr256.npz
++│   │   ├── embeddings_cr32.npz
++│   │   ├── embeddings_cr4.npz
++│   │   ├── embeddings_cr64.npz
++│   │   ├── orthogonality_stats.json
++│   │   ├── tsne_across_cr.png
++│   │   └── tsne_by_cr.png
++│   ├── latent_space_analysis_stage1_2
++│   │   ├── effective_rank_vs_cr_stage1_2.png
++│   │   ├── embeddings_cr128.npz
++│   │   ├── embeddings_cr16.npz
++│   │   ├── embeddings_cr256.npz
++│   │   ├── embeddings_cr32.npz
++│   │   ├── embeddings_cr4.npz
++│   │   ├── embeddings_cr64.npz
++│   │   ├── orthogonality_stats_stage1_2.json
++│   │   ├── tsne_across_cr_stage1_2.png
++│   │   └── tsne_by_cr_stage1_2.png
++│   └── latent_space_v2
++│       ├── stage1
++│       │   ├── compression_across_cr_pca_stage1.png
++│       │   ├── compression_across_cr_tsne_stage1.png
++│       │   ├── compression_across_cr_umap_stage1.png
++│       │   ├── compression_slots_pca_stage1.png
++│       │   ├── compression_slots_tsne_stage1.png
++│       │   ├── compression_slots_umap_stage1.png
++│       │   ├── embeddings_cr128.npz
++│       │   ├── embeddings_cr16.npz
++│       │   ├── embeddings_cr256.npz
++│       │   ├── embeddings_cr32.npz
++│       │   ├── embeddings_cr4.npz
++│       │   ├── embeddings_cr64.npz
++│       │   ├── orthogonality_stage1.json
++│       │   └── pca_variance_stage1.png
++│       └── stage1_2
++│           ├── compression_across_cr_pca_stage1_2.png
++│           ├── compression_across_cr_tsne_stage1_2.png
++│           ├── compression_across_cr_umap_stage1_2.png
++│           ├── compression_slots_pca_stage1_2.png
++│           ├── compression_slots_tsne_stage1_2.png
++│           ├── compression_slots_umap_stage1_2.png
++│           ├── embeddings_cr128.npz
++│           ├── embeddings_cr16.npz
++│           ├── embeddings_cr256.npz
++│           ├── embeddings_cr32.npz
++│           ├── embeddings_cr4.npz
++│           ├── embeddings_cr64.npz
++│           ├── orthogonality_stage1_2.json
++│           └── pca_variance_stage1_2.png
+ └── scripts
+     ├── downloads
+     │   ├── download_clara_data.sh
+     │   └── download_models.sh
+     ├── eval
+     │   ├── compute_metrics.py
++    │   ├── eval_comp128.sh
+     │   ├── eval_comp16.sh
++    │   ├── eval_comp16_trial.sh
++    │   ├── eval_e2e_cr4.sh
+     │   ├── eval_frames.sh
++    │   ├── eval_stage1_2_array.sh
+     │   ├── latent_space_analysis.py
++    │   ├── latent_space_analysis_v2.py
+     │   ├── __pycache__
+     │   │   └── latent_space_analysis.cpython-310.pyc
+-    │   └── run_latent_space_analysis.sh
++    │   ├── run_latent_space_analysis_stage1_2.sh
++    │   ├── run_latent_space_analysis_stage1_2_v2.sh
++    │   ├── run_latent_space_analysis_stage1.sh
++    │   └── run_latent_space_analysis_stage1_v2.sh
+     ├── tests
+     │   ├── check_cuda.sh
+     │   ├── eval_trial.sh
+@@ -399,6 +510,6 @@ vd425@vm-shell1:/vol/biomedic3/vd425/clara-main$ tree -L 4
+         ├── stage1_2_cr4_mutiple_gpus.sh
+         ├── stage1_array.sh
+         ├── stage1_cr4_mutiple_gpus.sh
+-        └── stage1_cr4.sh
+-
+-93 directories, 469 files
++        ├── stage1_cr4.sh
++        ├── stage2_array.sh
++        └── stage2_cr4_mutiple_gpus.sh
+\ No newline at end of file
+diff --git a/scripts/temporal_link_matrix.py b/scripts/temporal_link_matrix.py
+new file mode 100644
+index 0000000..741d988
+--- /dev/null
++++ b/scripts/temporal_link_matrix.py
+@@ -0,0 +1,137 @@
++"""
++Sketch: differentiable temporal-link multi-hop retrieval module for CLaRa.
++
++Slots into the existing pipeline as:
++
++    Q -> Dict(cos-sim over 100 candidates) -> KG(this file) -> top-20 (existing differentiable_topk) -> Ans
++
++All ops are differentiable end-to-end via the same straight-through (ST) trick
++already used in modeling_clara.py's differentiable_topk, so no new loss labels
++are required -- gradients from the NTP loss on the answer still reach theta_qr,
++theta_c, and the new link-matrix params (theta_link).
++"""
++import torch
++import torch.nn as nn
++import torch.nn.functional as F
++
++
++class TemporalLinkMatrix(nn.Module):
++    """
++    Learns a directed, query-conditioned adjacency over the D candidate
++    document embeddings, analogous to the DNC's temporal link matrix:
++    L[b, i, j] ~ "how useful is it to hop from doc i to doc j, given q".
++
++    Kept deliberately close to modeling_clara.py's style (explicit B/D/E
++    dims, per-row softmax with additive log-mask) so it's easy to review
++    next to differentiable_topk / differentiable_topk_top_1.
++    """
++
++    def __init__(self, hidden_dim: int, rank: int = 128):
++        super().__init__()
++        # Low-rank bilinear form keeps this cheap at D=100: (D x r) @ (r x r) @ (r x D)
++        self.proj_src = nn.Linear(hidden_dim, rank, bias=False)
++        self.proj_dst = nn.Linear(hidden_dim, rank, bias=False)
++        self.rel = nn.Parameter(torch.eye(rank) * 0.01)  # init near-identity, small
++        # Query conditions the edge scores (a link is only useful for THIS question)
++        self.query_gate = nn.Linear(hidden_dim, rank, bias=False)
++
++    def forward(self, M: torch.Tensor, q: torch.Tensor, cand_mask: torch.Tensor,
++                temperature: float = 1.0) -> torch.Tensor:
++        """
++        Args:
++            M:  [B, D, E]  candidate (flattened) memory-token embeddings, D=100
++            q:  [B, E]     query embedding (same space as M, from theta_qr)
++            cand_mask: [B, D] bool, True for valid (non-padded) candidates
++        Returns:
++            L: [B, D, D] row-stochastic directed link matrix (soft "edges")
++        """
++        B, D, E = M.shape
++        src = self.proj_src(M)                       # [B, D, r]
++        dst = self.proj_dst(M)                        # [B, D, r]
++        gate = torch.tanh(self.query_gate(q)).unsqueeze(1)  # [B, 1, r]
++
++        src = src * (1.0 + gate)                       # query-condition the source side
++        logits = torch.einsum("bir,rs,bjs->bij", src, self.rel, dst) / (E ** 0.5)
++
++        # mask invalid candidates (padding) and self-loops
++        pad = (~cand_mask).unsqueeze(1).expand(-1, D, -1)      # [B, D, D]
++        eye = torch.eye(D, device=M.device, dtype=torch.bool).unsqueeze(0)
++        logits = logits.masked_fill(pad | eye, float("-inf"))
++
++        L = F.softmax(logits / max(temperature, 1e-6), dim=-1)  # row-stochastic
++        L = torch.nan_to_num(L, nan=0.0)  # rows that are fully masked -> all-zero row
++        return L
++
++
++def multi_hop_propagate(s0: torch.Tensor, L: torch.Tensor, hops: int = 2,
++                         damping: float = 0.5) -> torch.Tensor:
++    """
++    Personalized-PageRank-style propagation of the base retrieval scores
++    through the learned link matrix, so a document's final score reflects
++    both direct query similarity AND being reachable from other relevant docs.
++
++        s_(t+1) = (1 - damping) * s0 + damping * L^T @ s_(t)
++
++    Args:
++        s0: [B, D]    initial scores, e.g. cos(q, M_i) from the existing Dict stage
++        L:  [B, D, D] output of TemporalLinkMatrix
++        hops: number of propagation steps (2-3 to match typical HotpotQA/MuSiQue hop counts)
++    Returns:
++        s_final: [B, D] graph-informed relevance scores, feed straight into
++                  the existing differentiable_topk(logits=s_final, k=20)
++    """
++    s = F.softmax(s0, dim=-1)
++    s0_soft = s.clone()
++    for _ in range(hops):
++        s = (1 - damping) * s0_soft + damping * torch.einsum("bij,bi->bj", L, s)
++    return s
++
++
++if __name__ == "__main__":
++    torch.manual_seed(0)
++    B, D, E = 2, 100, 512  # batch, candidate pool (was 20, now widened to 100), hidden dim
++
++    M = torch.randn(B, D, E, requires_grad=True)
++    q = torch.randn(B, E, requires_grad=True)
++    cand_mask = torch.ones(B, D, dtype=torch.bool)
++    cand_mask[0, 80:] = False  # simulate a shorter candidate list for sample 0
++
++    link_module = TemporalLinkMatrix(hidden_dim=E, rank=64)
++    L = link_module(M, q, cand_mask)
++    print("L shape:", L.shape, "row sums (should be ~1 or 0 for fully masked rows):")
++    print(L.sum(-1)[:, :5])
++
++    s0 = F.cosine_similarity(q.unsqueeze(1), M, dim=-1)  # [B, D], the existing "Dict" score
++    s0 = s0.masked_fill(~cand_mask, float("-inf"))
++    s_final = multi_hop_propagate(s0, L, hops=2, damping=0.5)
++    print("s_final shape:", s_final.shape, "sums:", s_final.sum(-1))
++
++    # Reuse the EXISTING differentiable_topk from modeling_clara.py unchanged:
++    def differentiable_topk(logits, k, temperature=1.0):
++        B, N = logits.shape
++        perturbed = logits / max(temperature, 1e-6)
++        topk_vals, topk_idx = perturbed.topk(k, dim=-1)
++        K_hard = torch.zeros(B, k, N, device=logits.device, dtype=logits.dtype)
++        K_hard.scatter_(2, topk_idx.unsqueeze(-1), 1.0)
++        K_soft = torch.zeros_like(K_hard)
++        taken = torch.zeros(B, N, device=logits.device, dtype=logits.dtype)
++        for j in range(k):
++            mask = (1.0 - taken.detach())
++            masked = perturbed + (mask + 1e-8).log()
++            pj = F.softmax(masked, dim=-1).float()
++            K_soft[:, j, :] = pj
++            taken = torch.clamp(taken + K_hard[:, j, :], max=1.0)
++        W = K_hard + (K_soft - K_soft.detach())
++        return W, topk_idx
++
++    s_final_filled = torch.nan_to_num(s_final, nan=float("-inf"))
++    Z, topk_idx = differentiable_topk(s_final_filled, k=20)
++    M_selected = torch.einsum("bkd,bde->bke", Z, M)  # [B, 20, E] -> feed to generator
++    print("M_selected shape:", M_selected.shape)
++
++    # Sanity check: gradient flows all the way back to M and q through
++    # TemporalLinkMatrix, multi_hop_propagate, AND differentiable_topk.
++    loss = M_selected.sum()
++    loss.backward()
++    print("grad reaches M:", M.grad is not None, "grad reaches q:", q.grad is not None)
++    print("grad reaches link_module.rel:", link_module.rel.grad is not None)
+\ No newline at end of file
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,0 +1,566 @@
+From 87595a0fbe88a6fc26fbfc6b69538b9578e5b9f7 Mon Sep 17 00:00:00 2001
+From: vovij <ap22292@qmul.ac.uk>
+Date: Thu, 25 Jun 2026 12:31:34 +0100
+Subject: [PATCH 11/17] created evaluation scripts for Apple's 16 and 128 CRs
+ checkpoins, stage1_2 retrieval array and stage 2 (E2E) training scripts.
+
+---
+ .DS_Store                          | Bin 8196 -> 8196 bytes
+ evaluation/evaluate.py             |  13 +++-
+ folder_structure.txt               | 108 +++++++++++++++++++++++++---
+ scripts/eval_comp128.sh            |  43 ++++++++++++
+ scripts/eval_comp16.sh             |  45 ++++++++++++
+ scripts/eval_stage1_2_array.sh     |  91 ++++++++++++++++++++++++
+ scripts/stage2_cr4_mutiple_gpus.sh | 109 +++++++++++++++++++++++++++++
+ 7 files changed, 396 insertions(+), 13 deletions(-)
+ create mode 100644 scripts/eval_comp128.sh
+ create mode 100644 scripts/eval_comp16.sh
+ create mode 100644 scripts/eval_stage1_2_array.sh
+ create mode 100644 scripts/stage2_cr4_mutiple_gpus.sh
+
+diff --git a/.DS_Store b/.DS_Store
+index 4322b10d6008f9fb645c20817f97e5ba6a4402cf..d3781b0c1b792eabcbe3c9be41565255a1b5c817 100644
+GIT binary patch
+delta 540
+zcmZp1XmOa}&uFkQU^hRb!Db$THYO&|Uy~0ANo`&yG=YgpX6IxF(IUoz$(uzLnV!F%
+zd`(o2E$hhccZ<JGRuB`J%qPZ!;40M@FaQA`Lm5LRLoq`sLn1>CkW~ewOMrAfLmoqM
+zPP$=ma(*sYA%oCAF+%Ed^Icq$a`Kaa>NuE}aT!Q|I_`*5j~CRE-24>cH9_?hWFR?A
+TSYTq}pUvzN=By()0Db}hvH*{;
+
+delta 136
+zcmZp1XmOa}&#1F8U^hRb&SoBgHYO&IO_L7@No`&yG=Ygp;NxTm(IUo#$(uzLnN~MX
+oz9uTic75yiMckhzD~O3q<`d&VaFsSD9%bCjE@93}s<uOn0RH1K;Q#;t
+
+diff --git a/evaluation/evaluate.py b/evaluation/evaluate.py
+index 12bc89b..d1e60e5 100644
+--- a/evaluation/evaluate.py
++++ b/evaluation/evaluate.py
+@@ -4,6 +4,9 @@
+ #
+ 
+ import os
++import sys
++sys.path = [p for p in sys.path if not p.endswith('/evaluation')]  # prevent self-import
++
+ import json
+ import argparse
+ import gc
+@@ -423,7 +426,7 @@ class DataLoader:
+     """Handles data loading for different datasets and stages."""
+     
+     @staticmethod
+-    def load_stage1_data(dataset: str, gold_retrieval: bool) -> List[Dict]:
++    def load_stage1_data(dataset: str, gold_retrieval: bool, max_samples: int = None) -> List[Dict]:
+         """Load stage1 evaluation data."""
+         retrieval_type = "with_pos" if gold_retrieval else "no_pos"
+         file_path = f"/vol/biomedic3/vd425/clara-main/ml-clara/evaluation/evaluation_data/end_to_end_evaluation/{dataset}/eval_processed_{retrieval_type}.jsonl"
+@@ -444,6 +447,9 @@ class DataLoader:
+             }
+             processed_data.append(processed_item)
+         
++        if max_samples:
++            processed_data = processed_data[:max_samples]
++
+         return processed_data
+     
+     @staticmethod
+@@ -706,7 +712,8 @@ def main():
+     parser.add_argument('--paraphrase_path', type=str, help='Path to paraphrase data')
+     parser.add_argument('--mse_visulize_path', type=str, help='Path to save MSE visualization')
+     parser.add_argument('--efficient_count', action='store_true', help='Count efficiency metrics')
+-    
++    parser.add_argument('--max_samples', type=int, default=None, help='Limit samples for quick testing')
++
+     args = parser.parse_args()
+     
+     # Process datasets
+@@ -718,7 +725,7 @@ def main():
+         
+         # Load data based on stage
+         if args.stage in ['stage1', 'stage1_2']:
+-            processed_data = DataLoader.load_stage1_data(dataset, args.gold_retrieval)
++            processed_data = DataLoader.load_stage1_data(dataset, args.gold_retrieval, args.max_samples)
+         elif args.stage == 'stage2':
+             # Added FRAMES eval
+             if dataset == 'frames':
+diff --git a/folder_structure.txt b/folder_structure.txt
+index 872688e..4b9e357 100644
+--- a/folder_structure.txt
++++ b/folder_structure.txt
+@@ -27,7 +27,74 @@ vd425@vm-shell1:/vol/biomedic3/vd425/clara-main$ tree -L 4
+ │   │   │   ├── tokenizer.json
+ │   │   │   └── tokenizer.model
+ │   │   └── README.md
+-│   └── stage1
++│   ├── stage1
++│   │   ├── cr128
++│   │   │   ├── adapters.pth
++│   │   │   ├── chat_template.jinja
++│   │   │   ├── checkpoints
++│   │   │   ├── config.json
++│   │   │   ├── decoder_first_last_layers.pth
++│   │   │   ├── modeling_clara.py
++│   │   │   ├── special_tokens_map.json
++│   │   │   ├── tokenizer_config.json
++│   │   │   ├── tokenizer.json
++│   │   │   └── tokenizer.model
++│   │   ├── cr16
++│   │   │   ├── adapters.pth
++│   │   │   ├── chat_template.jinja
++│   │   │   ├── checkpoints
++│   │   │   ├── config.json
++│   │   │   ├── decoder_first_last_layers.pth
++│   │   │   ├── modeling_clara.py
++│   │   │   ├── special_tokens_map.json
++│   │   │   ├── tokenizer_config.json
++│   │   │   ├── tokenizer.json
++│   │   │   └── tokenizer.model
++│   │   ├── cr256
++│   │   │   ├── adapters.pth
++│   │   │   ├── chat_template.jinja
++│   │   │   ├── checkpoints
++│   │   │   ├── config.json
++│   │   │   ├── decoder_first_last_layers.pth
++│   │   │   ├── modeling_clara.py
++│   │   │   ├── special_tokens_map.json
++│   │   │   ├── tokenizer_config.json
++│   │   │   ├── tokenizer.json
++│   │   │   └── tokenizer.model
++│   │   ├── cr32
++│   │   │   ├── adapters.pth
++│   │   │   ├── chat_template.jinja
++│   │   │   ├── checkpoints
++│   │   │   ├── config.json
++│   │   │   ├── decoder_first_last_layers.pth
++│   │   │   ├── modeling_clara.py
++│   │   │   ├── special_tokens_map.json
++│   │   │   ├── tokenizer_config.json
++│   │   │   ├── tokenizer.json
++│   │   │   └── tokenizer.model
++│   │   ├── cr4
++│   │   │   ├── adapters.pth
++│   │   │   ├── chat_template.jinja
++│   │   │   ├── checkpoints
++│   │   │   ├── config.json
++│   │   │   ├── decoder_first_last_layers.pth
++│   │   │   ├── modeling_clara.py
++│   │   │   ├── special_tokens_map.json
++│   │   │   ├── tokenizer_config.json
++│   │   │   ├── tokenizer.json
++│   │   │   └── tokenizer.model
++│   │   └── cr64
++│   │       ├── adapters.pth
++│   │       ├── chat_template.jinja
++│   │       ├── checkpoints
++│   │       ├── config.json
++│   │       ├── decoder_first_last_layers.pth
++│   │       ├── modeling_clara.py
++│   │       ├── special_tokens_map.json
++│   │       ├── tokenizer_config.json
++│   │       ├── tokenizer.json
++│   │       └── tokenizer.model
++│   └── stage1_2
+ │       ├── cr128
+ │       │   ├── adapters.pth
+ │       │   ├── chat_template.jinja
+@@ -49,6 +116,15 @@ vd425@vm-shell1:/vol/biomedic3/vd425/clara-main$ tree -L 4
+ │       │   ├── tokenizer.json
+ │       │   └── tokenizer.model
+ │       ├── cr256
++│       │   ├── adapters.pth
++│       │   ├── chat_template.jinja
++│       │   ├── checkpoints
++│       │   ├── config.json
++│       │   ├── decoder_first_last_layers.pth
++│       │   ├── special_tokens_map.json
++│       │   ├── tokenizer_config.json
++│       │   ├── tokenizer.json
++│       │   └── tokenizer.model
+ │       ├── cr32
+ │       │   ├── adapters.pth
+ │       │   ├── chat_template.jinja
+@@ -182,13 +258,6 @@ vd425@vm-shell1:/vol/biomedic3/vd425/clara-main$ tree -L 4
+ │   │   ├── download_57926.log
+ │   │   ├── download_clara_62872.log
+ │   │   ├── download_clara_62877.log
+-│   │   ├── download_clara_62878.log
+-│   │   ├── download_clara_62879.log
+-│   │   ├── download_clara_62880.log
+-│   │   ├── download_clara_62881.log
+-│   │   ├── download_clara_62882.log
+-│   │   ├── eval_frames_61288.log
+-│   │   └── ...
+ │   ├── stage1_cr128_65758.log
+ │   ├── stage1_cr16_65684.log
+ │   ├── stage1_cr256_65672.log
+@@ -268,6 +337,7 @@ vd425@vm-shell1:/vol/biomedic3/vd425/clara-main$ tree -L 4
+ │   ├── requirements_clara_eval.txt
+ │   ├── requirements_clean.txt
+ │   ├── requirements.txt
++│   ├── requirements_uv.txt
+ │   └── scripts
+ │       ├── evaluation_end_to_end.sh
+ │       ├── evaluation_instruction_tuning.sh
+@@ -295,6 +365,18 @@ vd425@vm-shell1:/vol/biomedic3/vd425/clara-main$ tree -L 4
+ │       ├── tokenizer_config.json
+ │       ├── tokenizer.json
+ │       └── tokenizer.model
++├── results
++│   └── latent_space_analysis
++│       ├── effective_rank_vs_cr.png
++│       ├── embeddings_cr128.npz
++│       ├── embeddings_cr16.npz
++│       ├── embeddings_cr256.npz
++│       ├── embeddings_cr32.npz
++│       ├── embeddings_cr4.npz
++│       ├── embeddings_cr64.npz
++│       ├── orthogonality_stats.json
++│       ├── tsne_across_cr.png
++│       └── tsne_by_cr.png
+ └── scripts
+     ├── downloads
+     │   ├── download_clara_data.sh
+@@ -302,15 +384,21 @@ vd425@vm-shell1:/vol/biomedic3/vd425/clara-main$ tree -L 4
+     ├── eval
+     │   ├── compute_metrics.py
+     │   ├── eval_comp16.sh
+-    │   └── eval_frames.sh
++    │   ├── eval_frames.sh
++    │   ├── latent_space_analysis.py
++    │   ├── __pycache__
++    │   │   └── latent_space_analysis.cpython-310.pyc
++    │   └── run_latent_space_analysis.sh
+     ├── tests
+     │   ├── check_cuda.sh
+     │   ├── eval_trial.sh
+     │   ├── stage1_cr4_debug.sh
+     │   └── test.sh
+     └── training
++        ├── stage1_2_array.sh
++        ├── stage1_2_cr4_mutiple_gpus.sh
+         ├── stage1_array.sh
+         ├── stage1_cr4_mutiple_gpus.sh
+         └── stage1_cr4.sh
+ 
+-76 directories, 356 files
+\ No newline at end of file
++93 directories, 469 files
+diff --git a/scripts/eval_comp128.sh b/scripts/eval_comp128.sh
+new file mode 100644
+index 0000000..8919159
+--- /dev/null
++++ b/scripts/eval_comp128.sh
+@@ -0,0 +1,43 @@
++#!/bin/bash
++#SBATCH --partition=gpus48
++#SBATCH --gres=gpu:4
++#SBATCH --output=/vol/biomedic3/vd425/clara-main/logs/eval_e2e_cr128_%j.log
++#SBATCH --time=23:59:59
++#SBATCH --job-name=eval_e2e_cr128
++
++set -ex
++
++source /vol/cuda/12.9.0/setup.sh
++export CUDA_HOME=/vol/cuda/12.9.0
++export PATH=$CUDA_HOME/bin:$PATH
++export NCCL_P2P_DISABLE=1
++export NCCL_IB_DISABLE=1
++export HF_HOME=/vol/biomedic3/vd425/.cache/huggingface
++export HF_DATASETS_CACHE=/vol/biomedic3/vd425/.cache/huggingface/datasets
++export HF_HUB_OFFLINE=1
++export TRITON_CACHE_DIR=/vol/biomedic3/vd425/.cache/triton
++export TORCH_EXTENSIONS_DIR=/vol/biomedic3/vd425/.cache/torch_extensions
++export TMPDIR=/vol/biomedic3/vd425/.tmp
++export MPLCONFIGDIR=/vol/biomedic3/vd425/.cache/matplotlib
++export PYTHONUNBUFFERED=1
++mkdir -p $HF_HOME $HF_DATASETS_CACHE $TRITON_CACHE_DIR $TORCH_EXTENSIONS_DIR $TMPDIR $MPLCONFIGDIR
++
++source /vol/biomedic3/vd425/clara-main/ml-clara/.venv/bin/activate
++
++BASE_DIR=/vol/biomedic3/vd425/clara-main
++CKPT_PATH=$BASE_DIR/checkpoints/CLaRa-7B-E2E/compression-128
++
++unset PYTHONPATH
++export PYTHONPATH=$BASE_DIR/ml-clara:$CKPT_PATH
++
++accelerate launch \
++    --num_processes=4 \
++    --num_machines=1 \
++    --mixed_precision=bf16 \
++    $BASE_DIR/ml-clara/evaluation/evaluate.py \
++        --model_path  "$CKPT_PATH" \
++        --stage       stage2 \
++        --dataset     nq,hotpotqa,musique,2wiki \
++        --generation_top_k 5 \
++        --batch_size  4 \
++        ${MAX_SAMPLES:+--max_samples $MAX_SAMPLES}
+\ No newline at end of file
+diff --git a/scripts/eval_comp16.sh b/scripts/eval_comp16.sh
+new file mode 100644
+index 0000000..89a3bdc
+--- /dev/null
++++ b/scripts/eval_comp16.sh
+@@ -0,0 +1,45 @@
++#!/bin/bash
++#SBATCH --partition=gpus48
++#SBATCH --gres=gpu:4
++#SBATCH --output=/vol/biomedic3/vd425/clara-main/logs/eval_e2e_ref_%j.log
++#SBATCH --time=23:59:59
++#SBATCH --job-name=eval_e2e_ref
++
++set -ex
++
++source /vol/cuda/12.9.0/setup.sh
++export CUDA_HOME=/vol/cuda/12.9.0
++export PATH=$CUDA_HOME/bin:$PATH
++export NCCL_P2P_DISABLE=1
++export NCCL_IB_DISABLE=1
++export HF_HOME=/vol/biomedic3/vd425/.cache/huggingface
++export HF_DATASETS_CACHE=/vol/biomedic3/vd425/.cache/huggingface/datasets
++export HF_HUB_OFFLINE=1
++export TRITON_CACHE_DIR=/vol/biomedic3/vd425/.cache/triton
++export TORCH_EXTENSIONS_DIR=/vol/biomedic3/vd425/.cache/torch_extensions
++export TMPDIR=/vol/biomedic3/vd425/.tmp
++export MPLCONFIGDIR=/vol/biomedic3/vd425/.cache/matplotlib
++export PYTHONUNBUFFERED=1
++mkdir -p $HF_HOME $HF_DATASETS_CACHE $TRITON_CACHE_DIR $TORCH_EXTENSIONS_DIR $TMPDIR $MPLCONFIGDIR
++
++source /vol/biomedic3/vd425/clara-main/ml-clara/.venv/bin/activate
++
++BASE_DIR=/vol/biomedic3/vd425/clara-main
++CKPT_PATH=$BASE_DIR/checkpoints/CLaRa-7B-E2E/compression-16
++
++unset PYTHONPATH
++export PYTHONPATH=$BASE_DIR/ml-clara:$CKPT_PATH
++
++MAX_SAMPLES=500   # set to "" for full eval
++
++accelerate launch \
++    --num_processes=4 \
++    --num_machines=1 \
++    --mixed_precision=bf16 \
++    $BASE_DIR/ml-clara/evaluation/evaluate.py \
++        --model_path  "$CKPT_PATH" \
++        --stage       stage2 \
++        --dataset     nq,hotpotqa,musique,2wiki \
++        --generation_top_k 5 \
++        --batch_size  4 \
++        ${MAX_SAMPLES:+--max_samples $MAX_SAMPLES}
+\ No newline at end of file
+diff --git a/scripts/eval_stage1_2_array.sh b/scripts/eval_stage1_2_array.sh
+new file mode 100644
+index 0000000..cd11c85
+--- /dev/null
++++ b/scripts/eval_stage1_2_array.sh
+@@ -0,0 +1,91 @@
++#!/bin/bash
++#SBATCH --partition=gpus48
++#SBATCH --gres=gpu:4
++#SBATCH --output=/vol/biomedic3/vd425/clara-main/logs/eval_stage1_2_cr%a_%j.log
++#SBATCH --time=4:00:00
++#SBATCH --job-name=eval_stage1_2
++#SBATCH --array=4
++
++set -ex
++
++# ─────────────────────────────────────────
++# Environment  (mirrors stage1_2 training script)
++# ─────────────────────────────────────────
++source /vol/cuda/12.9.0/setup.sh
++
++export CUDA_HOME=/vol/cuda/12.9.0
++export UV_CACHE_DIR=/vol/biomedic3/vd425/.cache/uv
++export PATH=$CUDA_HOME/bin:$PATH
++export NCCL_DEBUG=INFO
++export NCCL_P2P_DISABLE=1
++export NCCL_IB_DISABLE=1
++export HF_HOME=/vol/biomedic3/vd425/.cache/huggingface
++export HF_DATASETS_CACHE=/vol/biomedic3/vd425/.cache/huggingface/datasets
++export HF_HUB_OFFLINE=1
++export TRITON_CACHE_DIR=/vol/biomedic3/vd425/.cache/triton
++export TORCH_EXTENSIONS_DIR=/vol/biomedic3/vd425/.cache/torch_extensions
++export TMPDIR=/vol/biomedic3/vd425/.tmp
++export PYTHONUNBUFFERED=1
++mkdir -p $HF_HOME $HF_DATASETS_CACHE $TRITON_CACHE_DIR $TORCH_EXTENSIONS_DIR $TMPDIR
++
++source /vol/biomedic3/vd425/clara-main/ml-clara/.venv/bin/activate
++
++# ─────────────────────────────────────────
++# Config
++# ─────────────────────────────────────────
++CR=${SLURM_ARRAY_TASK_ID}
++NUM_GPUS=${SLURM_GPUS_ON_NODE:-4}
++BASE_DIR=/vol/biomedic3/vd425/clara-main
++CKPT_PATH=$BASE_DIR/checkpoints/stage1_2/cr${CR}
++MAX_SAMPLES=500   # set to "" for full eval
++
++# modeling_clara.py lives in the checkpoint dir — must be on PYTHONPATH
++# (same pattern as apple eval scripts)
++unset PYTHONPATH
++export PYTHONPATH=$BASE_DIR/ml-clara:$CKPT_PATH:$PYTHONPATH
++
++echo "========================================"
++echo "Evaluating stage1_2  CR=${CR}x  GPUs=${NUM_GPUS}"
++echo "Checkpoint : $CKPT_PATH"
++echo "========================================"
++nvcc --version
++python -c "import torch; print('torch:', torch.__version__, '| cuda:', torch.version.cuda)"
++nvidia-smi
++
++# ─────────────────────────────────────────
++# Helper
++# ─────────────────────────────────────────
++run_eval() {
++    local DATASET=$1
++    local GOLD_FLAG=$2   # "--gold_retrieval" or ""
++    local LABEL=$3       # "with_pos" or "no_pos"
++
++    echo ""
++    echo ">>> dataset=${DATASET}  retrieval=${LABEL}"
++
++    accelerate launch \
++        --num_processes=${NUM_GPUS} \
++        --num_machines=1 \
++        --mixed_precision=bf16 \
++        $BASE_DIR/ml-clara/evaluation/evaluate.py \
++            --model_path  "$CKPT_PATH" \
++            --stage       stage1_2 \
++            --dataset     "$DATASET" \
++            --generation_top_k 5 \
++            --batch_size  4 \
++            ${MAX_SAMPLES:+--max_samples $MAX_SAMPLES} \
++            $GOLD_FLAG
++}
++
++# ─────────────────────────────────────────
++# All 4 datasets × normal + oracle
++# ─────────────────────────────────────────
++for DATASET in nq hotpotqa musique 2wiki; do
++    run_eval "$DATASET" ""                 "no_pos"
++    run_eval "$DATASET" "--gold_retrieval" "with_pos"
++done
++
++echo ""
++echo "========================================"
++echo "Done — CR=${CR}x.  Results in $CKPT_PATH/"
++echo "========================================"
+\ No newline at end of file
+diff --git a/scripts/stage2_cr4_mutiple_gpus.sh b/scripts/stage2_cr4_mutiple_gpus.sh
+new file mode 100644
+index 0000000..f663ef8
+--- /dev/null
++++ b/scripts/stage2_cr4_mutiple_gpus.sh
+@@ -0,0 +1,109 @@
++#!/bin/bash
++#SBATCH --partition=gpus48
++#SBATCH --gres=gpu:4
++#SBATCH --output=/vol/biomedic3/vd425/clara-main/logs/stage2_e2e_cr4_%j.log
++#SBATCH --time=4-11:59:00
++#SBATCH --job-name=clara_stage2_e2e_cr4
++
++set -ex
++
++# ─────────────────────────────────────────
++# Environment
++# ─────────────────────────────────────────
++source /vol/cuda/12.9.0/setup.sh
++
++export CUDA_HOME=/vol/cuda/12.9.0
++export UV_CACHE_DIR=/vol/biomedic3/vd425/.cache/uv
++export PATH=$CUDA_HOME/bin:$PATH
++export NCCL_DEBUG=INFO
++export NCCL_P2P_DISABLE=1
++export NCCL_IB_DISABLE=1
++export HF_HOME=/vol/biomedic3/vd425/.cache/huggingface
++export HF_DATASETS_CACHE=/vol/biomedic3/vd425/.cache/huggingface/datasets
++export TRITON_CACHE_DIR=/vol/biomedic3/vd425/.cache/triton
++export TORCH_EXTENSIONS_DIR=/vol/biomedic3/vd425/.cache/torch_extensions
++export TMPDIR=/vol/biomedic3/vd425/.tmp
++export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
++mkdir -p $HF_HOME $HF_DATASETS_CACHE $TRITON_CACHE_DIR $TORCH_EXTENSIONS_DIR $TMPDIR
++
++source /vol/biomedic3/vd425/clara-main/ml-clara/.venv/bin/activate
++export PYTHONPATH=/vol/biomedic3/vd425/clara-main/ml-clara:$PYTHONPATH
++
++nvcc --version
++python -c "import torch; print('torch:', torch.__version__, '| cuda:', torch.version.cuda)"
++
++# ─────────────────────────────────────────
++# Config
++# ─────────────────────────────────────────
++CR=4
++NUM_GPUS=${SLURM_GPUS_ON_NODE:-4}
++BASE_DIR=/vol/biomedic3/vd425/clara-main
++
++MODEL_PATH=$BASE_DIR/models/Mistral-7B-Instruct-v0.2
++PRETRAIN_CHECKPOINT=$BASE_DIR/checkpoints/stage1_2/cr${CR}
++
++# Training data: all 4 datasets with positives guaranteed (paper setup).
++# MuSiQue is hard to converge alone, so the paper combines NQ + HotpotQA +
++# 2Wiki + MuSiQue into one pool. The *_with_pos variant ensures each sample
++# has at least one gold document in its 20-candidate pool.
++DATA_PATH="$BASE_DIR/data/e2e_training_ours_*_with_pos/train-*.parquet"
++
++SAVE_PATH=$BASE_DIR/checkpoints/stage2/cr${CR}
++mkdir -p $SAVE_PATH $BASE_DIR/logs
++
++echo "Using ${NUM_GPUS} GPUs"
++echo "Pretrain checkpoint: ${PRETRAIN_CHECKPOINT}"
++echo "Train data: ${DATA_PATH}"
++
++# ─────────────────────────────────────────
++# Training command
++# ─────────────────────────────────────────
++training_commands=(
++    openrlhf.cli.train_sft
++    --pretrain "$MODEL_PATH"
++    --pretrain_checkpoint "$PRETRAIN_CHECKPOINT"
++    --stage stage2
++    --compress_rate "$CR"
++    --doc_max_length 256
++    --dataset "$DATA_PATH"
++    --max_len 1024
++    --train_batch_size 32
++    --micro_train_batch_size 1
++    --save_path "$SAVE_PATH"
++    --ckpt_path "$SAVE_PATH/checkpoints"
++    --save_steps -2
++    --save_hf_ckpt
++    --logging_steps 1
++    --eval_steps 100
++    --zero_stage 2
++    --max_epochs 1
++    --bf16
++    --flash_attn
++    --learning_rate 5e-6
++    --lr_scheduler constant
++    --gradient_checkpointing
++    --generation_top_k 5
++    --qa_loss
++    --do_eval_gen
++)
++
++# ─────────────────────────────────────────
++# Launch
++# ─────────────────────────────────────────
++DISTRIBUTED_ARGS="--nproc_per_node ${NUM_GPUS} \
++    --nnodes 1 \
++    --rdzv_id 103 \
++    --rdzv_backend c10d \
++    --rdzv_endpoint 127.0.0.1:29503 \
++    --master_addr 127.0.0.1 \
++    --master_port 29503 \
++    --node_rank 0"
++
++nvidia-smi
++echo "Starting Stage 2 (end-to-end) training — compression rate ${CR}x on ${NUM_GPUS} GPUs"
++torchrun $DISTRIBUTED_ARGS -m "${training_commands[@]}"
++
++# Copy model definition alongside checkpoint
++cp $BASE_DIR/ml-clara/openrlhf/models/modeling_clara.py $SAVE_PATH
++
++echo "Done!"
+\ No newline at end of file
+-- 
+2.50.1 (Apple Git-155)
+
