@@ -23,6 +23,19 @@ Each results_metrics_*.json file is expected to look like:
         "2wiki":     {...}
     }
 
+NOTE on "frames": evaluate.py historically routed the "frames" dataset
+through calculate_basic_metrics (F1/EM/acc only), unlike every other dataset,
+which goes through calculate_stage2_metrics (F1/EM/acc + recall@k/precision@k).
+As a result, existing results_metrics_*.json files show NaN for frames'
+recall@1/3/5, even though the sibling per-example {dataset}_{stage}_{gold}_{k}.jsonl
+file already contains everything needed to compute it (topk_idx + pos_index
+per example, same index space, confirmed empirically). Rather than requiring
+a re-run of evaluate.py on the cluster, this script recomputes recall@k /
+precision@k for "frames" directly from that sibling .jsonl whenever the
+metrics file is missing them -- see recompute_frames_recall() below. This is
+the ONLY change from the original script; every other code path is
+unchanged.
+
 Usage
 -----
 # Point it anywhere under checkpoints/ -- labels always start right after
@@ -53,6 +66,9 @@ python3 build_metrics_table.py --root ./checkpoints --percent
 # (this brings back the old collision risk between same-named folders, so
 # only use it when you know the run names are unique on their own)
 python3 build_metrics_table.py --root ./checkpoints --label_from_parts 1
+
+# Disable the frames recall@k recomputation and show it as NaN like before
+python3 build_metrics_table.py --root ./checkpoints --no_frames_recall_fix
 """
 
 
@@ -69,6 +85,7 @@ except ImportError:
     raise
 
 METRIC_COLS = ["f1", "em", "recall@1", "recall@3", "recall@5"]
+K_VALUES = [1, 3, 5]
 
 
 def natural_sort_key(label: str):
@@ -158,7 +175,73 @@ def load_metrics(json_path: Path):
         return None
 
 
-def build_rows(root: Path, pattern: str, datasets, per_dataset: bool, label_from_parts: int, label_regex: str, anchor: str):
+def recall_missing(metrics: dict) -> bool:
+    """True if any recall@k key is absent, None, or NaN (e.g. json.load turns
+    a literal NaN into float('nan'), which is what a stale frames entry has)."""
+    for k in K_VALUES:
+        v = metrics.get(f"recall@{k}")
+        if v is None or (isinstance(v, float) and v != v):  # v != v is the NaN check
+            return True
+    return False
+
+
+def find_sibling_jsonl(metrics_json_path: Path, dataset: str):
+    """
+    The per-example results file sits next to results_metrics_{stage}_{gold}_{k}.json
+    as {dataset}_{stage}_{gold}_{k}.jsonl (evaluate.py line ~897/937). Reuse the
+    "{stage}_{gold}_{k}" suffix from the metrics filename so this works regardless
+    of which stage/gold_retrieval/top_k combination produced it.
+    """
+    stem = metrics_json_path.stem  # "results_metrics_stage2_False_5"
+    prefix = "results_metrics_"
+    if not stem.startswith(prefix):
+        return None
+    suffix = stem[len(prefix):]  # "stage2_False_5"
+    candidate = metrics_json_path.parent / f"{dataset}_{suffix}.jsonl"
+    return candidate if candidate.exists() else None
+
+
+def recompute_frames_recall(jsonl_path: Path, k_values=K_VALUES):
+    """
+    Recomputes recall@k / precision@k the same way evaluate.py's
+    calculate_stage2_metrics does (topk_idx vs. pos_index overlap), from the
+    saved per-example jsonl. Only recall@k/precision@k are recomputed here;
+    f1/em/acc/avg_output_length are left as whatever the original
+    results_metrics_*.json already reported for this dataset.
+    """
+    recall = {k: 0 for k in k_values}
+    precision = {k: 0 for k in k_values}
+    n = 0
+
+    with open(jsonl_path, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            item = json.loads(line)
+            if "topk_idx" not in item or "pos_index" not in item:
+                return None  # can't recompute, sibling file doesn't have what's needed
+            scores = item["topk_idx"]
+            pos_index = set(item["pos_index"])
+            for k in k_values:
+                top_k = set(scores[:k])
+                hit = len(top_k & pos_index)
+                recall[k] += hit / len(pos_index) if len(pos_index) > 0 else 0
+                precision[k] += hit / k
+            n += 1
+
+    if n == 0:
+        return None
+
+    result = {}
+    for k in k_values:
+        result[f"recall@{k}"] = recall[k] / n
+        result[f"precision@{k}"] = precision[k] / n
+    return result
+
+
+def build_rows(root: Path, pattern: str, datasets, per_dataset: bool, label_from_parts: int,
+               label_regex: str, anchor: str, fix_frames_recall: bool):
     files = find_metrics_files(root, pattern)
     if not files:
         return [], []
@@ -183,6 +266,22 @@ def build_rows(root: Path, pattern: str, datasets, per_dataset: bool, label_from
         if not available:
             print(f"[WARN] {label} ({fpath}): no usable dataset entries found, skipping", file=sys.stderr)
             continue
+
+        # Always calculate and populate recall/precision for "frames" by
+        # recomputing from the sibling .jsonl when the metrics file has it
+        # missing/NaN, since evaluate.py never wrote it for this dataset.
+        if fix_frames_recall and "frames" in available and recall_missing(data["frames"]):
+            sibling = find_sibling_jsonl(fpath, "frames")
+            if sibling is not None:
+                recomputed = recompute_frames_recall(sibling)
+                if recomputed is not None:
+                    data["frames"] = {**data["frames"], **recomputed}
+                else:
+                    print(f"[WARN] {label}: found {sibling.name} but it's missing "
+                          f"topk_idx/pos_index, couldn't recompute frames recall", file=sys.stderr)
+            else:
+                print(f"[WARN] {label}: frames recall@k missing and no sibling "
+                      f"frames_*.jsonl found next to {fpath.name} to recompute from", file=sys.stderr)
 
         if per_dataset:
             for ds in available:
@@ -278,6 +377,12 @@ def main():
         action="store_true",
         help="Don't show the source_file column in the printed table (still included in CSV)",
     )
+    parser.add_argument(
+        "--no_frames_recall_fix",
+        action="store_true",
+        help="Disable recomputing frames recall@k/precision@k from the sibling .jsonl; "
+        "show NaN for frames recall as originally written by evaluate.py instead.",
+    )
     args = parser.parse_args()
 
     root = Path(args.root)
@@ -293,6 +398,7 @@ def main():
         args.label_from_parts,
         args.label_regex,
         args.anchor,
+        fix_frames_recall=not args.no_frames_recall_fix,
     )
 
     if not rows:
